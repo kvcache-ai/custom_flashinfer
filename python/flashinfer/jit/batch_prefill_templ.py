@@ -38,7 +38,10 @@ std::vector<int64_t> BatchPrefillWithKVCachePlan(
     unsigned int num_qo_heads,
     unsigned int num_kv_heads,
     unsigned int page_size,
-    bool enable_cuda_graph) {
+    bool enable_cuda_graph,
+    unsigned int capture_padded_batch_size,
+    unsigned int capture_total_num_rows,
+    unsigned int capture_batch_size) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * float_workspace_buffer.element_size();
   size_t int_workspace_size_in_bytes =
@@ -58,7 +61,7 @@ std::vector<int64_t> BatchPrefillWithKVCachePlan(
     int_workspace_size_in_bytes,
     plan_info, qo_indptr.data_ptr<{{ dtype_idx }}>(), kv_indptr.data_ptr<{{ dtype_idx }}>(),
     batch_size, num_qo_heads, num_kv_heads, {{ head_dim }}, page_size, enable_cuda_graph,
-    sizeof({{ dtype_o }}), torch_current_stream);
+    sizeof({{ dtype_o }}), capture_padded_batch_size, capture_total_num_rows, capture_batch_size, torch_current_stream);
 
   TORCH_CHECK(status == cudaSuccess, "Failed to plan prefill with error: ", cudaGetErrorString(status));
 
@@ -204,6 +207,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
 
   const auto q_stride_n = q.stride(0);
   const auto q_stride_h = q.stride(1);
+  printf("q_stride_n %d, q_stride_h %d\n", q_stride_n, q_stride_h);
 
   const int64_t* kv_cache_strides = nullptr;
   auto k_strides = paged_k_cache.strides();
@@ -240,7 +244,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
   params.kv_tile_indices = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.kv_tile_indices_offset);
   params.o_indptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.o_indptr_offset);
   params.kv_chunk_size_ptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.kv_chunk_size_ptr_offset);
-  if (plan_info.split_kv) {
+  if (true || plan_info.split_kv) {
     params.merge_indptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.merge_indptr_offset);
     tmp_v = GetPtrFromBaseOffset<{{ dtype_o }}>(float_buffer_ptr, plan_info.v_offset);
     tmp_s = GetPtrFromBaseOffset<float>(float_buffer_ptr, plan_info.s_offset);

@@ -826,6 +826,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         self._paged_kv_last_page_len_buf = paged_kv_last_page_len_buf
         self._custom_mask_buf = custom_mask_buf
         self._qk_indptr_buf = qk_indptr_buf
+        self._plan_info = None
 
     @property
     def is_cuda_graph_enabled(self) -> bool:
@@ -983,6 +984,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
             )
 
         if self.is_cuda_graph_enabled:
+            """
             if batch_size != self._fixed_batch_size:
                 raise ValueError(
                     "The batch size should be fixed during the lifecycle of the wrapper in "
@@ -991,17 +993,18 @@ class BatchPrefillWithPagedKVCacheWrapper:
                         batch_size, self._fixed_batch_size
                     )
                 )
+            """    
             if len(paged_kv_indices) > len(self._paged_kv_indices_buf):
                 raise ValueError(
                     "The length of paged_kv_indices exceeds the allocated buffer size."
                 )
 
-            self._qo_indptr_buf.copy_(qo_indptr, non_blocking=True)
-            self._paged_kv_indptr_buf.copy_(paged_kv_indptr, non_blocking=True)
+            self._qo_indptr_buf[:batch_size+1].copy_(qo_indptr, non_blocking=True)
+            self._paged_kv_indptr_buf[:batch_size+1].copy_(paged_kv_indptr, non_blocking=True)
             self._paged_kv_indices_buf[: len(paged_kv_indices)].copy_(
                 paged_kv_indices, non_blocking=True
             )
-            self._paged_kv_last_page_len_buf.copy_(
+            self._paged_kv_last_page_len_buf[:batch_size].copy_(
                 paged_kv_last_page_len, non_blocking=True
             )
 
@@ -1018,7 +1021,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
                     packed_custom_mask, non_blocking=True
                 )
                 # NOTE(Zihao): qk_indptr has the same length as qo_indptr
-                self._qk_indptr_buf.copy_(qk_indptr, non_blocking=True)
+                self._qk_indptr_buf[:batch_size+1].copy_(qk_indptr, non_blocking=True)
         else:
             self._qo_indptr_buf = qo_indptr.to(self.device, non_blocking=True)
             self._paged_kv_indptr_buf = paged_kv_indptr.to(
@@ -1064,6 +1067,9 @@ class BatchPrefillWithPagedKVCacheWrapper:
             num_kv_heads,
             page_size,
             self.is_cuda_graph_enabled,
+            self._plan_info[0] if self._plan_info else 0,
+            self._plan_info[1] if self._plan_info else 0,
+            self._fixed_batch_size if self._plan_info else 0,
         )
         self._causal = causal
         self._pos_encoding_mode = pos_encoding_mode
