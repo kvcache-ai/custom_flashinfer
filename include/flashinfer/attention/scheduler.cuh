@@ -113,16 +113,6 @@ inline auto PrefillBinarySearchKVChunkSize(const uint32_t max_batch_size_if_spli
                       ceil_div(std::max(int(kv_len_arr[i]), 1), low);
   }
 
-  printf("packed_qo_len_arr\n");
-  for (uint32_t i = 0; i < batch_size; ++i) {
-      printf("%d ", packed_qo_len_arr[i]);
-  }
-  printf("kv_len_arr\n");
-  for (uint32_t i = 0; i < batch_size; ++i) {
-      printf("%d ", kv_len_arr[i]);
-  }
-  printf("qo_chunk_size %d low %d max_kv_len %d new_batch_size %d\n", qo_chunk_size, low, max_kv_len, new_batch_size);
-
   return std::make_tuple(low < max_kv_len, low, new_batch_size);
 }
 
@@ -615,7 +605,6 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
             << num_kv_heads;
     throw std::invalid_argument(err_msg.str());
   }
-  printf("enable_cuda_graph %d\n", enable_cuda_graph);
   // step 0: get the number of SMs
   int num_sm = 0;
   int dev_id = 0;
@@ -636,8 +625,10 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
                              head_dim, page_size, max_batch_size_if_split, enable_cuda_graph);
   if (capture_padded_batch_size && capture_padded_batch_size < new_batch_size)
   {
-      printf("CUDA Graph error: new_batch_size %d in replay bigger than capture_padded_batch_size %d!\n", new_batch_size, capture_padded_batch_size);
-      exit(1);
+      std::ostringstream err_msg;
+      err_msg << "CUDA Graph error: new_batch_size " << new_batch_size << " in replay bigger than capture_padded_batch_size "
+          << capture_padded_batch_size;
+      throw std::invalid_argument(err_msg.str());
   }
   plan_info.cta_tile_q = cta_tile_q;
   plan_info.total_num_rows = total_num_rows;
@@ -702,12 +693,9 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
       bool* block_valid_mask_h =
           GetPtrFromBaseOffset<bool>(page_locked_int_buffer, plan_info.block_valid_mask_offset);
       std::copy(merge_indptr_vec.begin(), merge_indptr_vec.end(), merge_indptr_h);
-      printf("block_valid_mask_h %ld\n", plan_info.block_valid_mask_offset);
       for (uint32_t i = 0; i < padded_batch_size; ++i) {
           block_valid_mask_h[i] = i < new_batch_size;
-          printf("%d ", block_valid_mask_h[i]);
       }
-      printf("\n");
   }
   size_t num_bytes_to_copy = int_allocator.num_allocated_bytes();
   FLASHINFER_CUDA_CALL(cudaMemcpyAsync(int_buffer, page_locked_int_buffer, num_bytes_to_copy,

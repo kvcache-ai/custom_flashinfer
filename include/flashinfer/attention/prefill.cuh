@@ -579,37 +579,6 @@ __device__ __forceinline__ void compute_qk(smem_t<swizzle_mode_q>* q_smem,
       *k_smem_offset_r =
           k_smem->template advance_offset_by_row<16, channel_size_128b_kv>(*k_smem_offset_r);
 
-      if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && fd == 0)
-      {
-          printf("bx 9 s_frag in compute qk %d fkv %d\n", fd, fkv);
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int NUM_FRAGS_KV_idx = 0; NUM_FRAGS_KV_idx < NUM_FRAGS_KV; NUM_FRAGS_KV_idx++)
-              {
-                  for (int k_idx = 0; k_idx < 8; k_idx++)
-                      printf("%f ", s_frag[NUM_FRAGS_Q_idx][NUM_FRAGS_KV_idx][k_idx]);
-                  printf("\n");
-              }
-              printf("\n");
-          }
-          printf("\n");
-      }
-      if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && fd == 0)
-      {
-          printf("bx 9 a_frag in compute qk %d\n", fd);
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int k_idx = 0; k_idx < 4; k_idx++)
-                  printf("%f %f ", *(half*)(&a_frag[NUM_FRAGS_Q_idx][k_idx]), *((half*)(&a_frag[NUM_FRAGS_Q_idx][k_idx])+1));
-              printf("\n");
-          }
-          printf("\n");
-          printf("bx 9 b_frag in compute qk %d\n", fd);
-          for (int k_idx = 0; k_idx < 4; k_idx++)
-              printf("%f %f ", *(half*)&b_frag[k_idx], *((half*)&b_frag[k_idx]+1));
-          printf("\n");
-      }
-
 #pragma unroll
       for (uint32_t fq = 0; fq < NUM_FRAGS_Q; ++fq) {
         if constexpr (std::is_same_v<DTypeQKAccum, float>) {
@@ -629,38 +598,6 @@ __device__ __forceinline__ void compute_qk(smem_t<swizzle_mode_q>* q_smem,
           }
         }
       }
-
-      if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && fd == 0)
-      {
-          printf("bx 9 s_frag in compute qk %d fkv %d\n", fd, fkv);
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int NUM_FRAGS_KV_idx = 0; NUM_FRAGS_KV_idx < NUM_FRAGS_KV; NUM_FRAGS_KV_idx++)
-              {
-                  for (int k_idx = 0; k_idx < 8; k_idx++)
-                      printf("%f ", s_frag[NUM_FRAGS_Q_idx][NUM_FRAGS_KV_idx][k_idx]);
-                  printf("\n");
-              }
-              printf("\n");
-          }
-          printf("\n");
-      }
-      if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && fd == 0)
-      {
-          printf("bx 9 a_frag in compute qk %d\n", fd);
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int k_idx = 0; k_idx < 4; k_idx++)
-                  printf("%f %f ", *(half*)(&a_frag[NUM_FRAGS_Q_idx][k_idx]), *((half*)(&a_frag[NUM_FRAGS_Q_idx][k_idx])+1));
-              printf("\n");
-          }
-          printf("\n");
-          printf("bx 9 b_frag in compute qk %d\n", fd);
-          for (int k_idx = 0; k_idx < 4; k_idx++)
-              printf("%f %f ", *(half*)&b_frag[k_idx], *((half*)&b_frag[k_idx]+1));
-          printf("\n");
-      }
-
     }
     
     if constexpr (sizeof(DTypeKV) == 1) {
@@ -1924,11 +1861,6 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
     const uint32_t qo_upper_bound =
         min(qo_len, ceil_div((qo_tile_idx + 1) * num_rows_per_cta, group_size));
 
-    /*if (blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-    {
-        printf("block %d, request_idx %d, qo_tile_idx %d, chunk_start %d, chunk_end %d\n", bx, request_idx, qo_tile_idx, chunk_start, chunk_end);
-    }*/
-
     constexpr uint32_t head_dim = NUM_FRAGS_D * 16;
     constexpr uint32_t channel_size_128b_q = head_dim / num_elems_per_128b<DTypeQ>();
     constexpr uint32_t channel_size_128b_kv = head_dim / num_elems_per_128b<DTypeKV>();
@@ -2012,7 +1944,8 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
                  lane_idx / 16),
              kv_smem_offset_w = k_smem.get_permuted_offset<channel_size_128b_kv>(
                  warp_idx * kv_frag_rows + lane_idx / kv_frag_cols, lane_idx % kv_frag_cols);
-    const IdType last_indptr = paged_kv.indptr[paged_kv.batch_size];
+    const IdType page_kv_batch_size = *params.batch_size_ptr;
+    const IdType last_indptr = paged_kv.indptr[page_kv_batch_size];
 
     uint32_t packed_page_iter_base =
         paged_kv.indptr[request_idx] * paged_kv.page_size + chunk_start;
@@ -2057,10 +1990,6 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
              : chunk_size) /
         (16 * NUM_WARPS_KV * NUM_FRAGS_KV);
 
-    /*if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-    {
-        printf("num_iterations %d\n", num_iterations);
-    }*/
 #pragma unroll 1
     for (uint32_t iter = 0; iter < num_iterations; ++iter) {
       packed_page_iter_base += 16 * NUM_WARPS_KV * NUM_FRAGS_KV;
@@ -2079,14 +2008,6 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
       cp_async::wait_group<1>();
       block.sync();
 
-      if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-      {
-        printf("share mem iter %d\n", iter);
-          for (int i = 0; i < 10; i++)
-            printf("%f %f ", *(half*)((int*)(qo_smem.base) + i), *((half*)((int*)(qo_smem.base) + i)+1));
-          printf("\n");
-      }
-
       if constexpr (POS_ENCODING_MODE == PosEncodingMode::kRoPELlama) {
         k_smem_inplace_apply_rotary<NUM_WARPS_Q, NUM_WARPS_KV, NUM_FRAGS_D, NUM_FRAGS_KV,
                                     swizzle_mode_kv, DTypeKV>(
@@ -2096,41 +2017,9 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
         block.sync();
       }
 
-      /*if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-      {
-          printf("bx 9 s_frag before compute rope\n");
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int NUM_FRAGS_KV_idx = 0; NUM_FRAGS_KV_idx < NUM_FRAGS_KV; NUM_FRAGS_KV_idx++)
-              {
-                  for (int k_idx = 0; k_idx < 8; k_idx++)
-                      printf("%f ", s_frag[NUM_FRAGS_Q_idx][NUM_FRAGS_KV_idx][k_idx]);
-                  printf("\n");
-              }
-              printf("\n");
-          }
-          printf("\n");
-      }*/
-
       // compute attention score
       compute_qk<NUM_FRAGS_Q, NUM_FRAGS_D, NUM_FRAGS_KV, swizzle_mode_q, swizzle_mode_kv, DTypeQ,
                  DTypeKV>(&qo_smem, &q_smem_offset_r, &k_smem, &k_smem_offset_r, s_frag);
-
-      /*if (blockIdx.x == 9 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
-      {
-          printf("bx 9 s_frag after compute rope\n");
-          for (int NUM_FRAGS_Q_idx = 0; NUM_FRAGS_Q_idx < NUM_FRAGS_Q; NUM_FRAGS_Q_idx++)
-          {
-              for (int NUM_FRAGS_KV_idx = 0; NUM_FRAGS_KV_idx < NUM_FRAGS_KV; NUM_FRAGS_KV_idx++)
-              {
-                  for (int k_idx = 0; k_idx < 8; k_idx++)
-                      printf("%f ", s_frag[NUM_FRAGS_Q_idx][NUM_FRAGS_KV_idx][k_idx]);
-                  printf("\n");
-              }
-              printf("\n");
-          }
-          printf("\n");
-      }*/
 
       logits_transform<NUM_FRAGS_Q, NUM_FRAGS_D, NUM_FRAGS_KV>(
           params, variant, /*batch_idx=*/request_idx, qo_packed_idx_base,

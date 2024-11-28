@@ -174,6 +174,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
   torch::Tensor paged_kv_indptr,
   torch::Tensor paged_kv_indices,
   torch::Tensor paged_kv_last_page_len,
+  torch::Tensor batch_size_tensor,
   std::optional<torch::Tensor> maybe_qk_indptr,
   unsigned int layout, int32_t window_left, float logits_soft_cap, float sm_scale,
   float rope_scale, float rope_theta, std::optional<torch::Tensor> maybe_lse) {
@@ -207,7 +208,6 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
 
   const auto q_stride_n = q.stride(0);
   const auto q_stride_h = q.stride(1);
-  printf("q_stride_n %d, q_stride_h %d\n", q_stride_n, q_stride_h);
 
   const int64_t* kv_cache_strides = nullptr;
   auto k_strides = paged_k_cache.strides();
@@ -234,7 +234,8 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
     static_cast<{{ dtype_o }}*>(o.data_ptr()),
     /*lse=*/(maybe_lse ? static_cast<float*>(maybe_lse->data_ptr()) : nullptr),
     {% if use_alibi == "true" %}static_cast<float*>(maybe_alibi_slopes->data_ptr()){% else %}nullptr{% endif %},
-    num_qo_heads, q_stride_n, q_stride_h, window_left, logits_soft_cap, sm_scale, rope_scale, rope_theta);
+    num_qo_heads, q_stride_n, q_stride_h, window_left, logits_soft_cap, sm_scale, rope_scale, rope_theta,
+    static_cast<{{ dtype_idx }}*>(batch_size_tensor.data_ptr()));
 
   {{ dtype_o }}* tmp_v = nullptr;
   float* tmp_s = nullptr;
