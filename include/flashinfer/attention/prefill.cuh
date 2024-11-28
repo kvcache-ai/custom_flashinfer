@@ -599,7 +599,6 @@ __device__ __forceinline__ void compute_qk(smem_t<swizzle_mode_q>* q_smem,
         }
       }
     }
-    
     if constexpr (sizeof(DTypeKV) == 1) {
       if (fd % 2 == 1) {
         *k_smem_offset_r = k_smem->template advance_offset_by_column<2>(*k_smem_offset_r, fd / 2);
@@ -2196,8 +2195,9 @@ cudaError_t BatchPrefillWithRaggedKVCacheDispatched(typename AttentionVariant::P
         FLASHINFER_CUDA_CALL(
             cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
         if constexpr (AttentionVariant::use_softmax) {
+          // TODO: &total_num_rows is not captiable for cuda graph
           FLASHINFER_CUDA_CALL(VariableLengthMergeStates(tmp_v, tmp_s, params.merge_indptr, o, lse,
-                                                         total_num_rows, num_qo_heads, HEAD_DIM,
+                                                         total_num_rows, &total_num_rows, num_qo_heads, HEAD_DIM,
                                                          stream));
         } else {
           FLASHINFER_CUDA_CALL(VariableLengthAttentionSum(
@@ -2281,7 +2281,7 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(typename AttentionVariant::Pa
                                              AttentionVariant>;
       FLASHINFER_CUDA_CALL(
           cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
-      if (true || tmp_v == nullptr) {
+      if (tmp_v == nullptr) {
         // do not partition kv
         params.partition_kv = false;
         void* args[] = {(void*)&group_size_fastdiv, (void*)&params};
@@ -2298,7 +2298,7 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(typename AttentionVariant::Pa
             cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
         if constexpr (AttentionVariant::use_softmax) {
           FLASHINFER_CUDA_CALL(VariableLengthMergeStates(tmp_v, tmp_s, params.merge_indptr, o, lse,
-                                                         total_num_rows, num_qo_heads, HEAD_DIM,
+                                                         total_num_rows, params.total_num_rows_ptr, num_qo_heads, HEAD_DIM,
                                                          stream));
         } else {
           FLASHINFER_CUDA_CALL(VariableLengthAttentionSum(

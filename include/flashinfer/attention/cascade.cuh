@@ -346,7 +346,8 @@ __global__ void PersistentVariableLengthMergeStatesKernel(DTypeIn* __restrict__ 
                                                           float* __restrict__ S, IdType* indptr,
                                                           DTypeO* __restrict__ v_merged,
                                                           float* __restrict__ s_merged,
-                                                          uint32_t seq_len, uint32_t num_heads) {
+                                                          const uint32_t* __restrict__ seq_len_ptr, uint32_t num_heads) {
+  uint32_t seq_len = *seq_len_ptr;
   uint32_t tx = threadIdx.x, ty = threadIdx.y;
   uint32_t cta_id = blockIdx.x;
   uint32_t num_ctas = gridDim.x;
@@ -641,7 +642,7 @@ cudaError_t AttentionSum(DTypeIn* v, DTypeO* v_sum, uint32_t num_index_sets, uin
 
 template <typename DTypeIn, typename DTypeO, typename IdType>
 cudaError_t VariableLengthMergeStates(DTypeIn* v, float* s, IdType* indptr, DTypeO* v_merged,
-                                      float* s_merged, uint32_t seq_len, uint32_t num_heads,
+                                      float* s_merged, const uint32_t seq_len, const uint32_t* seq_len_ptr, uint32_t num_heads,
                                       uint32_t head_dim, cudaStream_t stream = nullptr) {
   int dev_id = 0;
   int num_sms = 0;
@@ -665,7 +666,7 @@ cudaError_t VariableLengthMergeStates(DTypeIn* v, float* s, IdType* indptr, DTyp
 
     dim3 nblks(num_sms * num_blocks_per_sm);
     dim3 nthrs(bdx, bdy);
-    void* args[] = {&v, &s, &indptr, &v_merged, &s_merged, &seq_len, &num_heads};
+    void* args[] = {&v, &s, &indptr, &v_merged, &s_merged, &seq_len_ptr, &num_heads};
     FLASHINFER_CUDA_CALL(
         cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
     FLASHINFER_CUDA_CALL(cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));

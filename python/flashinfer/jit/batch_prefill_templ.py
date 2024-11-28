@@ -175,6 +175,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
   torch::Tensor paged_kv_indices,
   torch::Tensor paged_kv_last_page_len,
   torch::Tensor batch_size_tensor,
+  torch::Tensor num_tokens_tensor,
   std::optional<torch::Tensor> maybe_qk_indptr,
   unsigned int layout, int32_t window_left, float logits_soft_cap, float sm_scale,
   float rope_scale, float rope_theta, std::optional<torch::Tensor> maybe_lse) {
@@ -245,7 +246,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
   params.kv_tile_indices = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.kv_tile_indices_offset);
   params.o_indptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.o_indptr_offset);
   params.kv_chunk_size_ptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.kv_chunk_size_ptr_offset);
-  if (true || plan_info.split_kv) {
+  if (plan_info.split_kv) {
     params.merge_indptr = GetPtrFromBaseOffset<{{ dtype_idx }}>(int_buffer_ptr, plan_info.merge_indptr_offset);
     tmp_v = GetPtrFromBaseOffset<{{ dtype_o }}>(float_buffer_ptr, plan_info.v_offset);
     tmp_s = GetPtrFromBaseOffset<float>(float_buffer_ptr, plan_info.s_offset);
@@ -254,6 +255,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
     }
   }
   params.total_num_rows = plan_info.total_num_rows;
+  params.total_num_rows_ptr = static_cast<uint32_t*>(num_tokens_tensor.data_ptr());
   params.padded_batch_size = plan_info.padded_batch_size;
 
   cudaError_t status = cudaSuccess;

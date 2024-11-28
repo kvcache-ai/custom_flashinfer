@@ -274,6 +274,7 @@ def get_batch_prefill_module(*args):
             paged_kv_indices: torch.Tensor,
             paged_kv_last_page_len: torch.Tensor,
             batch_size_tensor: torch.Tensor,
+            num_tokens_tensor: torch.Tensor,
             maybe_qk_indptr: Optional[torch.Tensor],
             layout: int,
             window_left: int,
@@ -298,6 +299,7 @@ def get_batch_prefill_module(*args):
                 paged_kv_indices,
                 paged_kv_last_page_len,
                 batch_size_tensor,
+                num_tokens_tensor,
                 maybe_qk_indptr,
                 layout,
                 window_left,
@@ -727,6 +729,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         paged_kv_indices_buf: Optional[torch.Tensor] = None,
         paged_kv_last_page_len_buf: Optional[torch.Tensor] = None,
         batch_size_tensor_buf: Optional[torch.Tensor] = None,
+        num_tokens_tensor_buf: Optional[torch.Tensor] = None,
         custom_mask_buf: Optional[torch.Tensor] = None,
         qk_indptr_buf: Optional[torch.Tensor] = None,
     ) -> None:
@@ -769,8 +772,12 @@ class BatchPrefillWithPagedKVCacheWrapper:
             This argument is only effective when ``use_cuda_graph`` is ``True``.
 
         batch_size_tensor_buf : Optional[torch.Tensor]
-            The user reserved buffer to store the ``batch size`` array, the size of
+            The user reserved buffer to store the ``batch size``, the size of
             the buffer should be ``[1]``.
+            
+        num_tokens_tensor_buf : Optional[torch.Tensor]
+            The user reserved buffer to store the ``num of tokens in batch``, the size of
+            the buffer should be ``[1]``, dtype should be torch.uint32.
 
         custom_mask_buf : Optional[torch.Tensor]
             The user reserved buffer to store the custom mask tensor, should be large enough to
@@ -836,6 +843,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         self._paged_kv_indices_buf = paged_kv_indices_buf
         self._paged_kv_last_page_len_buf = paged_kv_last_page_len_buf
         self._batch_size_tensor_buf = batch_size_tensor_buf
+        self._num_tokens_tensor_buf = num_tokens_tensor_buf
         self._custom_mask_buf = custom_mask_buf
         self._qk_indptr_buf = qk_indptr_buf
         self._plan_info = None
@@ -874,6 +882,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         paged_kv_indices: torch.Tensor,
         paged_kv_last_page_len: torch.Tensor,
         batch_size_tensor: torch.Tensor,
+        num_tokens_tensor: torch.Tensor,
         num_qo_heads: int,
         num_kv_heads: int,
         head_dim: int,
@@ -1024,6 +1033,9 @@ class BatchPrefillWithPagedKVCacheWrapper:
             )
             self._batch_size_tensor_buf.copy_(
                 batch_size_tensor, non_blocking=True
+            )
+            self._num_tokens_tensor_buf.copy_(
+                num_tokens_tensor, non_blocking=True
             )
             if packed_custom_mask is not None:
                 if not torch.is_tensor(self._custom_mask_buf):
@@ -1237,6 +1249,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
             self._paged_kv_indices_buf,
             self._paged_kv_last_page_len_buf,
             self._batch_size_tensor_buf,
+            self._num_tokens_tensor_buf,
             self._qk_indptr_buf,
             TensorLayout[self._kv_layout].value,
             window_left,

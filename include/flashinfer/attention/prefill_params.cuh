@@ -229,6 +229,7 @@ struct BatchPrefillPagedParams {
   IdType* kv_chunk_size_ptr;
   IdType* batch_size_ptr;
   uint32_t total_num_rows;
+  uint32_t* total_num_rows_ptr;
   uint32_t padded_batch_size;
   bool partition_kv;
 
@@ -264,6 +265,7 @@ struct BatchPrefillPagedParams {
         kv_chunk_size_ptr(nullptr),
         batch_size_ptr(batch_size_ptr),
         total_num_rows(0),
+        total_num_rows_ptr(nullptr),
         padded_batch_size(0),
         partition_kv(false) {}
 

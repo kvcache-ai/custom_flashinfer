@@ -112,7 +112,6 @@ inline auto PrefillBinarySearchKVChunkSize(const uint32_t max_batch_size_if_spli
     new_batch_size += ceil_div(packed_qo_len_arr[i], qo_chunk_size) *
                       ceil_div(std::max(int(kv_len_arr[i]), 1), low);
   }
-
   return std::make_tuple(low < max_kv_len, low, new_batch_size);
 }
 
@@ -484,7 +483,8 @@ inline auto PrefillSplitQOKVIndptr(IdType* qo_indptr_h, IdType* kv_indptr_h, uin
       /*min_kv_chunk_size=*/std::max((128 / page_size), 1U));
 
   if (enable_cuda_graph) {
-    split_kv = total_num_tiles_q < max_batch_size_if_split;
+    split_kv = true;
+    //split_kv = total_num_tiles_q < max_batch_size_if_split;
   }
 
   // step 3: split qo_indptr and kv_indptr
@@ -605,6 +605,7 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
             << num_kv_heads;
     throw std::invalid_argument(err_msg.str());
   }
+
   // step 0: get the number of SMs
   int num_sm = 0;
   int dev_id = 0;
@@ -612,7 +613,6 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
   FLASHINFER_CUDA_CALL(cudaDeviceGetAttribute(&num_sm, cudaDevAttrMultiProcessorCount, dev_id));
   int num_blocks_per_sm = 2;
   int max_grid_size = num_blocks_per_sm * num_sm;
-
   uint32_t max_batch_size_if_split = max_grid_size / num_kv_heads;
   if (capture_padded_batch_size)
       max_batch_size_if_split = capture_padded_batch_size;
@@ -673,7 +673,7 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
   std::copy(o_indptr_vec.begin(), o_indptr_vec.end(), o_indptr_h);
   kv_chunk_size_ptr_h[0] = kv_chunk_size;
 
-  if (true || split_kv) {
+  if (split_kv) {
       AlignedAllocator float_allocator(float_buffer, float_workspace_size_in_bytes);
       plan_info.v_offset = float_allocator.aligned_alloc_offset(
           num_qo_heads * padded_batch_size * cta_tile_q * head_dim * sizeof_dtype_o, 16,
@@ -697,6 +697,7 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
           block_valid_mask_h[i] = i < new_batch_size;
       }
   }
+
   size_t num_bytes_to_copy = int_allocator.num_allocated_bytes();
   FLASHINFER_CUDA_CALL(cudaMemcpyAsync(int_buffer, page_locked_int_buffer, num_bytes_to_copy,
                                        cudaMemcpyHostToDevice, stream));
