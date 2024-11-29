@@ -46,7 +46,7 @@ void rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight,
 }
 
 void fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Tensor& weight,
-                       double eps) {
+                       torch::Tensor& batch_size_tensor, double eps) {
   CHECK_INPUT(input);
   CHECK_INPUT(residual);
   CHECK_INPUT(weight);
@@ -68,6 +68,7 @@ void fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Ten
     cudaError_t status = norm::FusedAddRMSNorm(static_cast<c_type*>(input.data_ptr()),
                                                static_cast<c_type*>(residual.data_ptr()),
                                                static_cast<c_type*>(weight.data_ptr()), batch_size,
+                                               static_cast<uint32_t*>(batch_size_tensor.data_ptr()),
                                                hidden_size, eps, torch_current_stream);
     TORCH_CHECK(status == cudaSuccess, "FusedAddRMSNorm failed with error code " +
                                            std::string(cudaGetErrorString(status)));

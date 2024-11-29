@@ -35,7 +35,7 @@ __device__ __forceinline__ float gelu_tanh(const float& val) {
   return val * cdf;
 }
 
-void silu_and_mul(torch::Tensor& out, torch::Tensor& input) {
+void silu_and_mul(torch::Tensor& out, torch::Tensor& input, torch::Tensor& num_tokens_tensor) {
   int d = input.size(-1) / 2;
   int64_t num_tokens = input.numel() / input.size(-1);
   dim3 grid(num_tokens);
@@ -46,13 +46,14 @@ void silu_and_mul(torch::Tensor& out, torch::Tensor& input) {
     uint32_t vec_size = 16 / sizeof(c_type);
     dim3 block(std::min(d / vec_size, 1024U));
     flashinfer::activation::act_and_mul_kernel<c_type, silu><<<grid, block, 0, stream>>>(
-        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d);
+        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d,
+        static_cast<uint32_t*>(num_tokens_tensor.data_ptr()));
 
     return true;
   });
 }
 
-void gelu_tanh_and_mul(torch::Tensor& out, torch::Tensor& input) {
+void gelu_tanh_and_mul(torch::Tensor& out, torch::Tensor& input, torch::Tensor& num_tokens_tensor) {
   int d = input.size(-1) / 2;
   int64_t num_tokens = input.numel() / input.size(-1);
   dim3 grid(num_tokens);
@@ -63,13 +64,14 @@ void gelu_tanh_and_mul(torch::Tensor& out, torch::Tensor& input) {
     uint32_t vec_size = 16 / sizeof(c_type);
     dim3 block(std::min(d / vec_size, 1024U));
     flashinfer::activation::act_and_mul_kernel<c_type, gelu_tanh><<<grid, block, 0, stream>>>(
-        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d);
+        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d,
+        static_cast<uint32_t*>(num_tokens_tensor.data_ptr()));
 
     return true;
   });
 }
 
-void gelu_and_mul(torch::Tensor& out, torch::Tensor& input) {
+void gelu_and_mul(torch::Tensor& out, torch::Tensor& input, torch::Tensor& num_tokens_tensor) {
   int d = input.size(-1) / 2;
   int64_t num_tokens = input.numel() / input.size(-1);
   dim3 grid(num_tokens);
@@ -80,7 +82,8 @@ void gelu_and_mul(torch::Tensor& out, torch::Tensor& input) {
     uint32_t vec_size = 16 / sizeof(c_type);
     dim3 block(std::min(d / vec_size, 1024U));
     flashinfer::activation::act_and_mul_kernel<c_type, gelu><<<grid, block, 0, stream>>>(
-        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d);
+        static_cast<c_type*>(out.data_ptr()), static_cast<c_type*>(input.data_ptr()), d,
+        static_cast<uint32_t*>(num_tokens_tensor.data_ptr()));
 
     return true;
   });

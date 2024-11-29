@@ -18,7 +18,7 @@
 void rmsnorm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight, double eps);
 
 void fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Tensor& weight,
-                       double eps);
+                       torch::Tensor& batch_size_tensor, double eps);
 
 void gemma_rmsnorm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight, double eps);
 

@@ -116,8 +116,12 @@ cudaError_t RMSNorm(T* input, T* weight, T* output, uint32_t batch_size, uint32_
 
 template <uint32_t VEC_SIZE, typename T>
 __global__ void FusedAddRMSNormKernel(T* __restrict__ input, T* __restrict__ residual,
-                                      T* __restrict__ weight, const uint32_t d, float eps) {
+                                      T* __restrict__ weight, const uint32_t d, 
+                                      const uint32_t* __restrict__ batch_size_ptr, float eps) {
+  const uint32_t batch_size = *batch_size_ptr;
   const uint32_t bx = blockIdx.x;
+  if (bx >= batch_size)
+      return;
   const uint32_t tx = threadIdx.x, ty = threadIdx.y;
   constexpr uint32_t warp_size = 32;
   const uint32_t num_warps = blockDim.y;
@@ -196,8 +200,8 @@ __global__ void FusedAddRMSNormKernel(T* __restrict__ input, T* __restrict__ res
 }
 
 template <typename T>
-cudaError_t FusedAddRMSNorm(T* input, T* residual, T* weight, uint32_t batch_size, uint32_t d,
-                            float eps = 1e-5, cudaStream_t stream = 0) {
+cudaError_t FusedAddRMSNorm(T* input, T* residual, T* weight, uint32_t batch_size, uint32_t* batch_size_ptr,
+                            uint32_t d, float eps = 1e-5, cudaStream_t stream = 0) {
   const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
 
   const uint32_t block_size = std::min<uint32_t>(1024, d / vec_size);
@@ -205,7 +209,7 @@ cudaError_t FusedAddRMSNorm(T* input, T* residual, T* weight, uint32_t batch_siz
   dim3 nblks(batch_size);
   dim3 nthrs(32, num_warps);
   const uint32_t smem_size = (num_warps + d) * sizeof(float);
-  void* args[] = {&input, &residual, &weight, &d, &eps};
+  void* args[] = {&input, &residual, &weight, &d, &batch_size_ptr, &eps};
 
   DISPATCH_ALIGNED_VEC_SIZE(vec_size, VEC_SIZE, {
     auto kernel = FusedAddRMSNormKernel<VEC_SIZE, T>;

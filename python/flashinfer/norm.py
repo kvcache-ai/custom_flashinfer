@@ -90,7 +90,7 @@ def _rmsnorm_fake(
 
 @register_custom_op("flashinfer::fused_add_rmsnorm", mutates_args=("input", "residual"))
 def fused_add_rmsnorm(
-    input: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6
+    input: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, batch_size_tensor: torch.Tensor, eps: float = 1e-6
 ) -> None:
     r"""Fused add root mean square normalization.
 
@@ -111,7 +111,7 @@ def fused_add_rmsnorm(
     eps: float
         Epsilon for numerical stability.
     """
-    get_norm_module().fused_add_rmsnorm(input, residual, weight, eps)
+    get_norm_module().fused_add_rmsnorm(input, residual, weight, batch_size_tensor, eps)
 
 
 @register_fake_op("flashinfer::fused_add_rmsnorm")
