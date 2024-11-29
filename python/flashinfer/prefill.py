@@ -1062,6 +1062,12 @@ class BatchPrefillWithPagedKVCacheWrapper:
             self._paged_kv_last_page_len_buf = paged_kv_last_page_len.to(
                 self.device, non_blocking=True
             )
+            self._batch_size_tensor_buf = batch_size_tensor.to(
+                self.device, non_blocking=True
+            )
+            self._num_tokens_tensor_buf = num_tokens_tensor.to(
+                self.device, non_blocking=True
+            )
             if packed_custom_mask is not None:
                 self._custom_mask_buf = packed_custom_mask.to(
                     self.device, non_blocking=True

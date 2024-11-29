@@ -23,7 +23,7 @@ void append_paged_kv_cache(torch::Tensor append_key, torch::Tensor append_value,
                            torch::Tensor batch_indices, torch::Tensor positions,
                            torch::Tensor paged_k_cache, torch::Tensor paged_v_cache,
                            torch::Tensor kv_indices, torch::Tensor kv_indptr,
-                           torch::Tensor kv_last_page_len, unsigned int layout) {
+                           torch::Tensor kv_last_page_len, torch::Tensor nnz_tensor, unsigned int layout) {
   CHECK_LAST_DIM_CONTIGUOUS(append_key);
   CHECK_LAST_DIM_CONTIGUOUS(append_value);
   CHECK_INPUT(batch_indices);
@@ -109,6 +109,7 @@ void append_paged_kv_cache(torch::Tensor append_key, torch::Tensor append_value,
                                             static_cast<c_type*>(append_value.data_ptr()),
                                             static_cast<int32_t*>(batch_indices.data_ptr()),
                                             static_cast<int32_t*>(positions.data_ptr()), nnz,
+                                            static_cast<uint32_t*>(nnz_tensor.data_ptr()),
                                             append_k_stride_n, append_k_stride_h, append_v_stride_n,
                                             append_v_stride_h, torch_current_stream);
     TORCH_CHECK(status == cudaSuccess,
