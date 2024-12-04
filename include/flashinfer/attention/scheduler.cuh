@@ -472,6 +472,9 @@ inline auto PrefillSplitQOKVIndptr(IdType* qo_indptr_h, IdType* kv_indptr_h, uin
     }
   }
 
+  // zbx: TODO: cta_tile_q may change when batch changes, which may cause total_num_tiles_q greater then capture.
+  // Need fix cta_tile_q and make total_num_tiles_q = ceil_div(total_num_rows, cta_tile_q) + batch_size;
+  // For performance, don't do it now.
   uint32_t total_num_tiles_q = 0;
   for (uint32_t request_idx = 0; request_idx < batch_size; ++request_idx) {
     total_num_tiles_q += ceil_div(packed_qo_len_arr[request_idx], cta_tile_q);
