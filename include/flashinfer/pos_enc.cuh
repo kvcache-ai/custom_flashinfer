@@ -272,15 +272,20 @@ __global__ void BatchQKApplyRotaryPosIdsCosSinCacheKernel(
 template <bool interleave, uint32_t head_dim, uint32_t vec_size, uint32_t bdx, typename DType,
           typename IdType>
 __global__ void BatchQKApplyRotaryPosIdsHeadParallelismKernel(
-    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ pos_ids, uint32_t nnz,
+    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ pos_ids, uint32_t* nnz_ptr,
     uint32_t num_qo_heads, uint32_t num_kv_heads, uint32_t rotary_dim, size_t q_stride_n,
     size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, size_t q_rope_stride_n,
     size_t q_rope_stride_h, size_t k_rope_stride_n, size_t k_rope_stride_h, float smooth_a,
     float smooth_b, float rope_rcp_scale, float rope_rcp_theta) {
   // NOTE: q and q_rope may be the same ptr, so do k and k_rope
+  
+  const uint32_t nnz = *nnz_ptr;
   uint32_t bx = blockIdx.x, tx = threadIdx.x, ty = threadIdx.y;
   uint32_t by = blockIdx.y;
   const uint32_t bdy = blockDim.y;
+  if (bx * bdy + ty >= nnz)
+      return;
+
   vec_t<float, vec_size> freq;
   if (tx * vec_size < rotary_dim) {
 #pragma unroll
@@ -343,14 +348,18 @@ __global__ void BatchQKApplyRotaryPosIdsHeadParallelismKernel(
 template <bool interleave, uint32_t head_dim, uint32_t vec_size, uint32_t bdx, typename DType,
           typename IdType>
 __global__ void BatchQKApplyRotaryPosIdsKernel(
-    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ pos_ids, uint32_t nnz,
+    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ pos_ids, uint32_t* nnz_ptr,
     uint32_t num_qo_heads, uint32_t num_kv_heads, uint32_t rotary_dim, size_t q_stride_n,
     size_t q_stride_h, size_t k_stride_n, size_t k_stride_h, size_t q_rope_stride_n,
     size_t q_rope_stride_h, size_t k_rope_stride_n, size_t k_rope_stride_h, float smooth_a,
     float smooth_b, float rope_rcp_scale, float rope_rcp_theta) {
   // NOTE: q and q_rope may be the same ptr, so do k and k_rope
+  const uint32_t nnz = *nnz_ptr;
   uint32_t bx = blockIdx.x, tx = threadIdx.x, ty = threadIdx.y;
   const uint32_t bdy = blockDim.y;
+  if (bx * bdy + ty >= nnz)
+      return;
+  
   vec_t<float, vec_size> freq;
   if (tx * vec_size < rotary_dim) {
 #pragma unroll
@@ -568,7 +577,7 @@ cudaError_t BatchQKApplyRotaryPosIdsCosSinCache(
 template <typename DType, typename IdType>
 cudaError_t BatchQKApplyRotaryPosIds(
     DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* __restrict__ pos_ids, uint32_t nnz,
-    uint32_t num_qo_heads, uint32_t num_kv_heads, uint32_t rotary_dim, uint32_t head_dim,
+    uint32_t* nnz_ptr, uint32_t num_qo_heads, uint32_t num_kv_heads, uint32_t rotary_dim, uint32_t head_dim,
     size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
     size_t q_rope_stride_n, size_t q_rope_stride_h, size_t k_rope_stride_n, size_t k_rope_stride_h,
     bool interleave, float rope_scale, float rope_theta, cudaStream_t stream = nullptr) {
@@ -594,7 +603,7 @@ cudaError_t BatchQKApplyRotaryPosIds(
                       (void*)&q_rope,
                       (void*)&k_rope,
                       (void*)&pos_ids,
-                      (void*)&nnz,
+                      (void*)&nnz_ptr,
                       (void*)&num_qo_heads,
                       (void*)&num_kv_heads,
                       (void*)&rotary_dim,
@@ -756,7 +765,7 @@ cudaError_t BatchQKApplyLlama31Rotary(
 
 template <typename DType, typename IdType>
 cudaError_t BatchQKApplyLlama31RotaryPosIds(
-    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* pos_ids, uint32_t nnz,
+    DType* q, DType* k, DType* q_rope, DType* k_rope, IdType* pos_ids, uint32_t nnz, uint32_t* nnz_ptr,
     uint32_t num_qo_heads, uint32_t num_kv_heads, uint32_t rotary_dim, uint32_t head_dim,
     size_t q_stride_n, size_t q_stride_h, size_t k_stride_n, size_t k_stride_h,
     size_t q_rope_stride_n, size_t q_rope_stride_h, size_t k_rope_stride_n, size_t k_rope_stride_h,
@@ -782,7 +791,7 @@ cudaError_t BatchQKApplyLlama31RotaryPosIds(
                       (void*)&q_rope,
                       (void*)&k_rope,
                       (void*)&pos_ids,
-                      (void*)&nnz,
+                      (void*)&nnz_ptr,
                       (void*)&num_qo_heads,
                       (void*)&num_kv_heads,
                       (void*)&rotary_dim,

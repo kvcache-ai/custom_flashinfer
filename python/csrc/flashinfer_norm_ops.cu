@@ -15,7 +15,8 @@
  */
 #include <torch/extension.h>
 
-void rmsnorm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight, double eps);
+void rmsnorm(torch::Tensor& out, torch::Tensor& input, torch::Tensor& weight,
+             torch::Tensor& batch_size_tensor, double eps);
 
 void fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Tensor& weight,
                        torch::Tensor& batch_size_tensor, double eps);

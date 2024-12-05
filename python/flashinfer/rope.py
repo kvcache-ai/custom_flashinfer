@@ -144,13 +144,14 @@ def _apply_rope_pos_ids(
     q_rope: torch.Tensor,
     k_rope: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: int,
     interleave: bool,
     rope_scale: float,
     rope_theta: float,
 ) -> None:
     get_rope_module().apply_rope_pos_ids(
-        q, k, q_rope, k_rope, pos_ids, rotary_dim, interleave, rope_scale, rope_theta
+        q, k, q_rope, k_rope, pos_ids, nnz_tensor, rotary_dim, interleave, rope_scale, rope_theta
     )
 
 
@@ -217,6 +218,7 @@ def _apply_llama31_rope_pos_ids(
     q_rope: torch.Tensor,
     k_rope: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: int,
     interleave: bool,
     rope_scale: float,
@@ -231,6 +233,7 @@ def _apply_llama31_rope_pos_ids(
         q_rope,
         k_rope,
         pos_ids,
+        nnz_tensor,
         rotary_dim,
         interleave,
         rope_scale,
@@ -350,6 +353,7 @@ def apply_rope_pos_ids_inplace(
     q: torch.Tensor,
     k: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: Optional[int] = None,
     interleave: bool = False,
     rope_scale: float = 1,
@@ -400,7 +404,7 @@ def apply_rope_pos_ids_inplace(
     if rotary_dim is None:
         rotary_dim = q.size(-1)
     _apply_rope_pos_ids(
-        q, k, q, k, pos_ids, rotary_dim, interleave, rope_scale, rope_theta
+        q, k, q, k, pos_ids, nnz_tensor, rotary_dim, interleave, rope_scale, rope_theta
     )
 
 
@@ -516,6 +520,7 @@ def apply_llama31_rope_pos_ids_inplace(
     q: torch.Tensor,
     k: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: Optional[int] = None,
     interleave: bool = False,
     rope_scale: float = 8,
@@ -580,6 +585,7 @@ def apply_llama31_rope_pos_ids_inplace(
         q,
         k,
         pos_ids,
+        nnz_tensor,
         rotary_dim,
         interleave,
         rope_scale,
@@ -704,6 +710,7 @@ def apply_rope_pos_ids(
     q: torch.Tensor,
     k: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: Optional[int] = None,
     interleave: bool = False,
     rope_scale: float = 1,
@@ -763,7 +770,7 @@ def apply_rope_pos_ids(
     if rotary_dim is None:
         rotary_dim = q.size(-1)
     _apply_rope_pos_ids(
-        q, k, q_rope, k_rope, pos_ids, rotary_dim, interleave, rope_scale, rope_theta
+        q, k, q_rope, k_rope, pos_ids, nnz_tensor, rotary_dim, interleave, rope_scale, rope_theta
     )
     return q_rope, k_rope
 
@@ -894,6 +901,7 @@ def apply_llama31_rope_pos_ids(
     q: torch.Tensor,
     k: torch.Tensor,
     pos_ids: torch.Tensor,
+    nnz_tensor: torch.Tensor,
     rotary_dim: Optional[int] = None,
     interleave: bool = False,
     rope_scale: float = 8,
@@ -966,6 +974,7 @@ def apply_llama31_rope_pos_ids(
         q_rope,
         k_rope,
         pos_ids,
+        nnz_tensor,
         rotary_dim,
         interleave,
         rope_scale,

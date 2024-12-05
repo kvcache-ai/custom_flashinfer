@@ -19,7 +19,8 @@
 
 using namespace flashinfer;
 
-void rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight, double eps) {
+void rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight, 
+            torch::Tensor& batch_size_tensor, double eps) {
   CHECK_INPUT(input);
   CHECK_INPUT(weight);
   auto device = input.device();
@@ -38,6 +39,7 @@ void rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight,
     cudaError_t status = norm::RMSNorm(static_cast<c_type*>(input.data_ptr()),
                                        static_cast<c_type*>(weight.data_ptr()),
                                        static_cast<c_type*>(output.data_ptr()), batch_size,
+                                       static_cast<uint32_t*>(batch_size_tensor.data_ptr()),
                                        hidden_size, eps, torch_current_stream);
     TORCH_CHECK(status == cudaSuccess,
                 "RMSNorm failed with error code " + std::string(cudaGetErrorString(status)));
