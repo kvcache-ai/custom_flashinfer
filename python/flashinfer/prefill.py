@@ -1102,9 +1102,9 @@ class BatchPrefillWithPagedKVCacheWrapper:
             num_kv_heads,
             page_size,
             self.is_cuda_graph_enabled,
-            self._plan_info[0] if self._plan_info else 0,
-            self._plan_info[1] if self._plan_info else 0,
-            self._fixed_batch_size if self._plan_info else 0,
+            self._plan_info[0] if self.is_cuda_graph_enabled and self._plan_info else 0,
+            self._plan_info[1] if self.is_cuda_graph_enabled and self._plan_info else 0,
+            self._fixed_batch_size if self.is_cuda_graph_enabled and self._plan_info else 0,
         )
         self._causal = causal
         self._pos_encoding_mode = pos_encoding_mode

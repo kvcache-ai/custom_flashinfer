@@ -626,7 +626,7 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
         o_indptr_vec] =
       PrefillSplitQOKVIndptr(qo_indptr_h, kv_indptr_h, batch_size, num_qo_heads, num_kv_heads,
                              head_dim, page_size, max_batch_size_if_split, enable_cuda_graph);
-  if (capture_padded_batch_size && capture_padded_batch_size < new_batch_size)
+  if (enable_cuda_graph && capture_padded_batch_size && capture_padded_batch_size < new_batch_size)
   {
       std::ostringstream err_msg;
       err_msg << "CUDA Graph error: new_batch_size " << new_batch_size << " in replay bigger than capture_padded_batch_size "
