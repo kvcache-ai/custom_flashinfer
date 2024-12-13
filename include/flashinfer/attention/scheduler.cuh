@@ -453,7 +453,9 @@ inline auto PrefillSplitQOKVIndptr(IdType* qo_indptr_h, IdType* kv_indptr_h, uin
   }
   int64_t avg_packed_qo_len = sum_packed_qo_len / batch_size;
   uint32_t cta_tile_q;
-  if (avg_packed_qo_len > 64 && head_dim < 256) {
+  if (enable_cuda_graph){
+    cta_tile_q = 16;
+  } else if (avg_packed_qo_len > 64 && head_dim < 256) {
     cta_tile_q = 128;
   } else {
     auto compute_capacity = GetCudaComputeCapability();
