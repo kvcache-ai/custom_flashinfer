@@ -636,7 +636,10 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
       throw std::invalid_argument(err_msg.str());
   }
   plan_info.cta_tile_q = cta_tile_q;
-  plan_info.total_num_rows = total_num_rows;
+  if (capture_total_num_rows)
+    plan_info.total_num_rows = capture_total_num_rows;
+  else
+    plan_info.total_num_rows = total_num_rows;
 
   plan_info.enable_cuda_graph = enable_cuda_graph;
   size_t padded_batch_size =
@@ -685,12 +688,9 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
           "batch_prefill_tmp_v");
       plan_info.s_offset = float_allocator.aligned_alloc_offset(
           num_qo_heads * padded_batch_size * cta_tile_q * sizeof(float), 16, "batch_prefill_tmp_s");
-      if (capture_total_num_rows)
-          plan_info.merge_indptr_offset = int_allocator.aligned_alloc_offset(
-              sizeof(IdType) * (capture_total_num_rows + 1), 16, "batch_prefill_merge_indptr");
-      else
-          plan_info.merge_indptr_offset = int_allocator.aligned_alloc_offset(
-              sizeof(IdType) * (plan_info.total_num_rows + 1), 16, "batch_prefill_merge_indptr");
+      
+      plan_info.merge_indptr_offset = int_allocator.aligned_alloc_offset(
+          sizeof(IdType) * (plan_info.total_num_rows + 1), 16, "batch_prefill_merge_indptr");
       plan_info.block_valid_mask_offset = int_allocator.aligned_alloc_offset(
           sizeof(bool) * padded_batch_size, 16, "batch_prefill_block_valid_mask");
       IdType* merge_indptr_h =
