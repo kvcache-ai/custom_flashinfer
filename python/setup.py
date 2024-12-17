@@ -71,8 +71,8 @@ def link_data_files() -> Iterator[None]:
 
     if sys.argv[1] != "develop":
         pass #TODO: fix this
-        shutil.rmtree(data_dir)
-        (this_dir / "MANIFEST.in").unlink(True)
+        #shutil.rmtree(data_dir)
+        #(this_dir / "MANIFEST.in").unlink(True)
 
 
 if __name__ == "__main__":
