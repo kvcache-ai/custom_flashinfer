@@ -153,7 +153,7 @@ def get_batch_prefill_module(*args):
     global _batch_prefill_modules
     if args not in _batch_prefill_modules:
         uri = get_batch_prefill_uri(*args)
-        if has_prebuilt_ops and uri in prebuilt_ops_uri:
+        if has_prebuilt_ops and uri in prebuilt_ops_uri and uri != 'batch_prefill_with_kv_cache_dtype_q_f16_dtype_kv_f16_dtype_o_f16_dtype_idx_i32_head_dim_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False':
             from . import _kernels
 
             # NOTE(Zihao): we should avoid hard-coded index like this, refactor it later
@@ -165,7 +165,7 @@ def get_batch_prefill_module(*args):
             ragged_run_func = _kernels.batch_prefill_with_ragged_kv_cache_run
             paged_run_func = _kernels.batch_prefill_with_paged_kv_cache_run
         else:
-            module = compile_batch_prefill_module(*args)
+            module = gen_batch_prefill_module(*args)
             plan_func = module.plan
             ragged_run_func = module.ragged_run
             paged_run_func = module.paged_run
@@ -273,8 +273,6 @@ def get_batch_prefill_module(*args):
             paged_kv_indptr: torch.Tensor,
             paged_kv_indices: torch.Tensor,
             paged_kv_last_page_len: torch.Tensor,
-            batch_size_tensor: torch.Tensor,
-            num_tokens_tensor: torch.Tensor,
             maybe_qk_indptr: Optional[torch.Tensor],
             layout: int,
             window_left: int,
@@ -283,32 +281,38 @@ def get_batch_prefill_module(*args):
             rope_scale: float,
             rope_theta: float,
             maybe_lse: Optional[torch.Tensor],
+            q_position: Optional[torch.Tensor],
+            kv_position: Optional[torch.Tensor],
         ) -> torch.Tensor:
-            return paged_run_func(
-                mask_mode,
-                float_workspace_buffer,
-                int_workspace_buffer,
-                plan_info_vec,
-                q,
-                paged_k_cache,
-                paged_v_cache,
-                maybe_custom_mask,
-                maybe_alibi_slopes,
-                qo_indptr,
-                paged_kv_indptr,
-                paged_kv_indices,
-                paged_kv_last_page_len,
-                batch_size_tensor,
-                num_tokens_tensor,
-                maybe_qk_indptr,
-                layout,
-                window_left,
-                logits_soft_cap,
-                sm_scale,
-                rope_scale,
-                rope_theta,
-                maybe_lse,
-            )
+            with q.device as device:  # device guard
+                o = torch.empty_like(q)
+                paged_run_func(
+                    mask_mode,
+                    float_workspace_buffer,
+                    int_workspace_buffer,
+                    plan_info_vec,
+                    q,
+                    paged_k_cache,
+                    paged_v_cache,
+                    maybe_custom_mask,
+                    maybe_alibi_slopes,
+                    qo_indptr,
+                    paged_kv_indptr,
+                    paged_kv_indices,
+                    paged_kv_last_page_len,
+                    maybe_qk_indptr,
+                    o,
+                    layout,
+                    window_left,
+                    logits_soft_cap,
+                    sm_scale,
+                    rope_scale,
+                    rope_theta,
+                    maybe_lse,
+                    q_position,
+                    kv_position,
+                )
+                return o
 
         @register_fake_op(f"flashinfer::{uri}_paged_run")
         def _fake_paged_run(
@@ -1170,6 +1174,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
         k_scale: Optional[float] = None,
         v_scale: Optional[float] = None,
         return_lse: bool = False,
+        q_position: Optional[torch.Tensor] = None,
+        kv_position: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         r"""Compute batch prefill/append attention between query and paged kv-cache.
 
@@ -1264,6 +1270,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
             rope_scale,
             rope_theta,
             lse,
+            q_position,
+            kv_position
         )
 
         if v_scale is not None:

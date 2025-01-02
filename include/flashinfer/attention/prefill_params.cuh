@@ -208,6 +208,7 @@ struct BatchPrefillPagedParams {
   IdType* q_indptr;
   IdType* qk_indptr;
   IdType* q_offset;  // q_offset is only used for fused-rope attention
+  IdType* kv_position;
   DTypeO* o;
   float* lse;
   float* alibi_slopes;
@@ -245,6 +246,7 @@ struct BatchPrefillPagedParams {
         q_indptr(q_indptr),
         qk_indptr(qk_indptr),
         q_offset(q_offset),
+        kv_position(kv_position),
         o(o),
         lse(lse),
         alibi_slopes(alibi_slopes),

@@ -178,7 +178,8 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
   torch::Tensor num_tokens_tensor,
   std::optional<torch::Tensor> maybe_qk_indptr,
   unsigned int layout, int32_t window_left, float logits_soft_cap, float sm_scale,
-  float rope_scale, float rope_theta, std::optional<torch::Tensor> maybe_lse) {
+  float rope_scale, float rope_theta, std::optional<torch::Tensor> maybe_lse, std::optional<at::Tensor> q_position,
+  std::optional<at::Tensor> kv_position) {
   PrefillPlanInfo plan_info;
   plan_info.FromVector(plan_info_vec);
   QKVLayout kv_layout = static_cast<QKVLayout>(layout);
@@ -231,7 +232,7 @@ torch::Tensor BatchPrefillWithPagedKVCacheRun(
     /*custom_mask=*/(maybe_custom_mask ? static_cast<uint8_t*>(maybe_custom_mask->data_ptr()) : nullptr),
     static_cast<{{ dtype_idx }}*>(qo_indptr.data_ptr()),
     /*qk_indptr=*/(maybe_qk_indptr ? static_cast<{{ dtype_idx }}*>(maybe_qk_indptr->data_ptr()) : nullptr),
-    /*q_offset=*/nullptr,
+    /*q_offset=*/q_position ? static_cast<{{dtype_idx}}*>(q_position->data_ptr()): nullptr, kv_position? static_cast<{{dtype_idx}}*>(kv_position->data_ptr()): nullptr,
     static_cast<{{ dtype_o }}*>(o.data_ptr()),
     /*lse=*/(maybe_lse ? static_cast<float*>(maybe_lse->data_ptr()) : nullptr),
     {% if use_alibi == "true" %}static_cast<float*>(maybe_alibi_slopes->data_ptr()){% else %}nullptr{% endif %},

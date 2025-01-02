@@ -149,6 +149,33 @@ __device__ __forceinline__ void q_frag_apply_llama_rope(T* x_first_half, T* x_se
   }
 }
 
+
+template <typename T, typename IdType>
+__device__ __forceinline__ void k_frag_apply_llama_rope_with_pos(T* x_first_half, T* x_second_half,
+                                                        const float* rope_freq,
+                                                        const uint32_t kv_offset,
+                                                        const IdType* kv_position,
+                                                        const uint_fastdiv group_size) {
+    static_assert(sizeof(T) == 2);
+    
+  float pos[2] = {static_cast<float>(kv_position[kv_offset]),
+                  static_cast<float>(kv_position[(kv_offset + 8)])};
+    // printf("pos[0] %f  kv_offset %d pos[1] %f kv_offset+8 %d\n ", pos[0], kv_offset, pos[1], kv_offset + 8);
+#pragma unroll
+  for (uint32_t reg_id = 0; reg_id < 8; ++reg_id) {
+    float cos, sin, tmp;
+    // 0 1 | 2 3
+    // ---------
+    // 4 5 | 6 7
+    
+    uint32_t i = reg_id / 4, j = (reg_id % 4) / 2;
+    __sincosf(pos[i] * rope_freq[2 * j + reg_id % 2], &sin, &cos);
+    tmp = x_first_half[reg_id];
+    x_first_half[reg_id] = (tmp * cos - (float)x_second_half[reg_id] * sin);
+    x_second_half[reg_id] = ((float)x_second_half[reg_id] * cos + tmp * sin);
+  }
+}
+
 template <typename T, typename IdType>
 __device__ __forceinline__ void q_frag_apply_llama_rope_with_pos(T* x_first_half, T* x_second_half,
                                                                  const float* rope_freq,
@@ -399,6 +426,88 @@ __device__ __forceinline__ void q_smem_inplace_apply_rotary(
     *q_smem_offset_r -= NUM_FRAGS_Q * 16 * channel_size_128b_q;
   }
 }
+
+template <uint32_t NUM_WARPS_Q, uint32_t NUM_WARPS_KV, uint32_t NUM_FRAGS_D, uint32_t NUM_FRAGS_KV,
+          SwizzleMode swizzle_mode, typename DTypeKV>
+__device__ __forceinline__ void k_smem_inplace_apply_rotary_with_pos(const uint32_t kv_idx_base,
+                                                            smem_t<swizzle_mode>* k_smem,
+                                                            uint32_t* k_smem_offset_r,
+                                                            float (*rope_freq)[4]) {
+  static_assert(sizeof(DTypeKV) == 2);
+  constexpr uint32_t head_dim = NUM_FRAGS_D * 16;
+  constexpr uint32_t channel_size_128b_kv = head_dim / num_elems_per_128b<DTypeKV>();
+  uint32_t k_frag_local[2][4];
+  const uint32_t lane_idx = threadIdx.x;
+  if constexpr (NUM_FRAGS_D == 4 && NUM_WARPS_Q == 4) {
+    static_assert(NUM_WARPS_KV == 1);
+    const uint32_t warp_idx = get_warp_idx_q<NUM_WARPS_Q, NUM_WARPS_KV>();
+    // horizontal-axis: y
+    // horizontal-axis: y
+    // vertical-axis: z
+    //         | 1-16       | 16-32      | 32-48      | 48-64      |
+    // | 1-16  | warp_idx=0 | warp_idx=1 | warp_idx=0 | warp_idx=1 |
+    // | 16-32 | warp_idx=2 | warp_idx=3 | warp_idx=2 | warp_idx=3 |
+    static_assert(NUM_FRAGS_KV % 2 == 0,
+                  "when NUM_FRAGS_D == 4, NUM_FRAGS_KV must be a multiple of 2");
+    uint32_t kv_idx = kv_idx_base + (warp_idx / 2) * 16 + lane_idx / 4;
+    *k_smem_offset_r =
+        (*k_smem_offset_r ^ (0x2 * (warp_idx % 2))) + (warp_idx / 2) * 16 * channel_size_128b_kv;
+#pragma unroll
+    for (uint32_t i = 0; i < NUM_FRAGS_KV / 2; ++i) {
+      // uint32_t fkv = warp_idx / 2 + i * 2;
+      uint32_t k_smem_offset_r_first_half = *k_smem_offset_r;
+      uint32_t fdi = (warp_idx % 2);
+      k_smem->ldmatrix_m8n8x4(k_smem_offset_r_first_half, k_frag_local[0]);
+      uint32_t k_smem_offset_r_last_half =
+          k_smem->template advance_offset_by_column<4>(k_smem_offset_r_first_half, 0);
+      k_smem->ldmatrix_m8n8x4(k_smem_offset_r_last_half, k_frag_local[1]);
+      k_frag_apply_llama_rope_with_pos<DTypeKV>((DTypeKV*)k_frag_local[0], (DTypeKV*)k_frag_local[1],
+                                         rope_freq[mma_di], kv_idx, kv_position, group_size);
+      k_smem->stmatrix_m8n8x4(k_smem_offset_r_last_half, k_frag_local[1]);
+      k_smem->stmatrix_m8n8x4(k_smem_offset_r_first_half, k_frag_local[0]);
+      *k_smem_offset_r += 32 * channel_size_128b_kv;
+      kv_idx += 32;
+    }
+    *k_smem_offset_r = (*k_smem_offset_r ^ (0x2 * (warp_idx % 2))) -
+                       ((warp_idx / 2) + NUM_FRAGS_KV) * 16 * channel_size_128b_kv;
+  } else {
+    const uint32_t warp_idx_x = get_warp_idx_q<NUM_WARPS_Q, NUM_WARPS_KV>(),
+                   warp_idx_z = get_warp_idx_kv<NUM_WARPS_Q, NUM_WARPS_KV>();
+    static_assert(NUM_FRAGS_D % (2 * NUM_WARPS_Q) == 0);
+    // horizontal axis: y
+    // vertical axis: z
+    // | (warp_idx_z, warp_idx_x)       | 1-16   | 16-32  | 32-48  | 48-64  | ...
+    // | 1-16*NUM_FRAGS_KV               | (0, 0) | (0, 1) | (0, 2) | (0, 3) | ...
+    // | 16*NUM_FRAGS_KV-32*NUM_FRAGS_KV  | (1, 0) | (1, 1) | (1, 2) | (1, 3) | ...
+    // ...
+    uint32_t kv_idx = kv_idx_base + (warp_idx_z * NUM_FRAGS_KV * 16) + lane_idx / 4;
+    *k_smem_offset_r = *k_smem_offset_r ^ (0x2 * warp_idx_x);
+#pragma unroll
+    for (uint32_t i = 0; i < NUM_FRAGS_KV; ++i) {
+      uint32_t k_smem_offset_r_first_half = *k_smem_offset_r;
+#pragma unroll
+      for (uint32_t j = 0; j < NUM_FRAGS_D / (2 * NUM_WARPS_Q); ++j) {
+        uint32_t fdi = warp_idx_x + j * NUM_WARPS_Q;
+        k_smem->ldmatrix_m8n8x4(k_smem_offset_r_first_half, k_frag_local[0]);
+        uint32_t k_smem_offset_r_last_half =
+            k_smem->template advance_offset_by_column<NUM_FRAGS_D>(k_smem_offset_r_first_half, 0);
+        k_smem->ldmatrix_m8n8x4(k_smem_offset_r_last_half, k_frag_local[1]);
+        k_frag_apply_llama_rope_with_pos<DTypeKV>((DTypeKV*)k_frag_local[0], (DTypeKV*)k_frag_local[1],
+                                         rope_freq[mma_di], kv_idx, kv_position, group_size);
+        k_smem->stmatrix_m8n8x4(k_smem_offset_r_last_half, k_frag_local[1]);
+        k_smem->stmatrix_m8n8x4(k_smem_offset_r_first_half, k_frag_local[0]);
+        k_smem_offset_r_first_half = k_smem->template advance_offset_by_column<2 * NUM_WARPS_Q>(
+            k_smem_offset_r_first_half, fdi);
+      }
+      *k_smem_offset_r += 16 * channel_size_128b_kv;
+      kv_idx += 16;
+    }
+    *k_smem_offset_r =
+        (*k_smem_offset_r ^ (0x2 * warp_idx_x)) - NUM_FRAGS_KV * 16 * channel_size_128b_kv;
+  }
+}
+
+
 
 template <uint32_t NUM_WARPS_Q, uint32_t NUM_WARPS_KV, uint32_t NUM_FRAGS_Q, uint32_t NUM_FRAGS_D,
           SwizzleMode swizzle_mode, typename DTypeQ, typename IdType>
@@ -1824,6 +1933,7 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
     DTypeQ* q = params.q;
     IdType* q_indptr = params.q_indptr;
     IdType* q_offset = params.q_offset;
+    IdType* kv_position = params.kv_position;
     IdType* o_indptr = params.o_indptr;
     DTypeO* o = params.o;
     float* lse = params.lse;
@@ -2008,11 +2118,23 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
       block.sync();
 
       if constexpr (POS_ENCODING_MODE == PosEncodingMode::kRoPELlama) {
-        k_smem_inplace_apply_rotary<NUM_WARPS_Q, NUM_WARPS_KV, NUM_FRAGS_D, NUM_FRAGS_KV,
-                                    swizzle_mode_kv, DTypeKV>(
-            (paged_kv.rope_pos_offset == nullptr ? 0 : paged_kv.rope_pos_offset[request_idx]) +
-                chunk_start + iter * 16 * NUM_WARPS_KV * NUM_FRAGS_KV,
-            &k_smem, &k_smem_offset_r, rope_freq);
+        if (kv_position == nullptr) {
+          k_smem_inplace_apply_rotary<NUM_WARPS_Q, NUM_WARPS_KV, NUM_FRAGS_D, NUM_FRAGS_KV,
+                                      swizzle_mode_kv, DTypeKV>(
+              (paged_kv.rope_pos_offset == nullptr ? 0 : paged_kv.rope_pos_offset[request_idx]) +
+                  chunk_start + iter * 16 * NUM_WARPS_KV * NUM_FRAGS_KV,
+              &k_smem, &k_smem_offset_r, rope_freq);
+        }
+        else {
+          int sum_last_page_len = 0;
+          for (int i = 0; i < request_idx; i++) {
+            sum_last_page_len += paged_kv.last_page_len[i];
+          }
+          k_smem_inplace_apply_rotary_with_pos<NUM_WARPS_Q, NUM_WARPS_KV, NUM_FRAGS_D, NUM_FRAGS_KV,
+          swizzle_mode_kv, DTypeKV>(
+            request_idx > 0 ? (paged_kv.indptr[request_idx]-request_idx) * paged_kv.page_size + sum_last_page_len + chunk_start + iter * 16 * NUM_WARPS_KV * NUM_MMA_KV: 0 + chunk_start + iter * 16 * NUM_WARPS_KV * NUM_MMA_KV, kv_position,
+            &k_smem, &k_smem_offset_r, rope_freq, group_size);
+        }
         block.sync();
       }
 
