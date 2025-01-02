@@ -165,7 +165,7 @@ def get_batch_prefill_module(*args):
             ragged_run_func = _kernels.batch_prefill_with_ragged_kv_cache_run
             paged_run_func = _kernels.batch_prefill_with_paged_kv_cache_run
         else:
-            module = gen_batch_prefill_module(*args)
+            module = compile_batch_prefill_module(*args)
             plan_func = module.plan
             ragged_run_func = module.ragged_run
             paged_run_func = module.paged_run
@@ -273,6 +273,8 @@ def get_batch_prefill_module(*args):
             paged_kv_indptr: torch.Tensor,
             paged_kv_indices: torch.Tensor,
             paged_kv_last_page_len: torch.Tensor,
+            batch_size_tensor: torch.Tensor,
+            num_tokens_tensor: torch.Tensor,
             maybe_qk_indptr: Optional[torch.Tensor],
             layout: int,
             window_left: int,
@@ -284,9 +286,7 @@ def get_batch_prefill_module(*args):
             q_position: Optional[torch.Tensor],
             kv_position: Optional[torch.Tensor],
         ) -> torch.Tensor:
-            with q.device as device:  # device guard
-                o = torch.empty_like(q)
-                paged_run_func(
+                return paged_run_func(
                     mask_mode,
                     float_workspace_buffer,
                     int_workspace_buffer,
@@ -300,8 +300,10 @@ def get_batch_prefill_module(*args):
                     paged_kv_indptr,
                     paged_kv_indices,
                     paged_kv_last_page_len,
+                    batch_size_tensor,
+                    num_tokens_tensor,
                     maybe_qk_indptr,
-                    o,
+
                     layout,
                     window_left,
                     logits_soft_cap,
@@ -312,7 +314,7 @@ def get_batch_prefill_module(*args):
                     q_position,
                     kv_position,
                 )
-                return o
+
 
         @register_fake_op(f"flashinfer::{uri}_paged_run")
         def _fake_paged_run(

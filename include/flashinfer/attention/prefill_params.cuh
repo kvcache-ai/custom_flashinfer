@@ -236,7 +236,7 @@ struct BatchPrefillPagedParams {
 
   __host__ BatchPrefillPagedParams(DTypeQ* q, paged_kv_t<DTypeKV, IdType> paged_kv,
                                    uint8_t* custom_mask, IdType* q_indptr, IdType* qk_indptr,
-                                   IdType* q_offset, DTypeO* o, float* lse, float* alibi_slopes,
+                                   IdType* q_offset, IdType* kv_position, DTypeO* o, float* lse, float* alibi_slopes,
                                    uint32_t num_qo_heads, IdType q_stride_n, IdType q_stride_h,
                                    int32_t window_left, float logits_soft_cap, float sm_scale,
                                    float rope_scale, float rope_theta, IdType* batch_size_ptr)
