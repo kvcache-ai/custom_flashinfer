@@ -1273,7 +1273,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
             if self._causal:
                 mask_mode = MaskMode.CAUSAL.value
             else:
-                mask_mode = MaskMode.NON_CAUSAL.value
+                mask_mode = MaskMode.CUSTOMCAUSAL.value
 
         out = self._cached_module.paged_run(
             mask_mode,

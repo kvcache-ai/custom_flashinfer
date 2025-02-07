@@ -759,6 +759,54 @@ __device__ __forceinline__ void logits_transform(const typename AttentionVariant
 }
 
 template <MaskMode MASK_MODE, uint32_t NUM_FRAGS_Q, uint32_t NUM_FRAGS_D, uint32_t NUM_FRAGS_KV,
+          typename AttentionVariant, typename DTypeQKAccum, typename IdType>
+__device__ __forceinline__ void custom_logits_mask(const typename AttentionVariant::ParamsT& params,
+                                            AttentionVariant variant, const uint32_t batch_idx,
+                                            const uint32_t qo_packed_idx_base,
+                                            const uint32_t kv_idx_base, const uint32_t qo_len,
+                                            const uint32_t kv_len, const uint32_t chunk_end,
+                                            const uint_fastdiv group_size,
+                                            DTypeQKAccum (*s_frag)[NUM_FRAGS_KV][8],
+                                            const IdType* q_position,
+                                            const IdType* kv_position) {
+  const uint32_t lane_idx = threadIdx.x, kv_head_idx = blockIdx.z;
+  uint32_t q[NUM_FRAGS_Q][2], r[NUM_FRAGS_Q][2];
+#pragma unroll
+  for (uint32_t fq = 0; fq < NUM_FRAGS_Q; ++fq) {
+#pragma unroll
+    for (uint32_t j = 0; j < 2; ++j) {
+      group_size.divmod(qo_packed_idx_base + fq * 16 + lane_idx / 4 + 8 * j, q[fq][j], r[fq][j]);
+    }
+  }
+
+#pragma unroll
+  for (uint32_t fq = 0; fq < NUM_FRAGS_Q; ++fq) {
+#pragma unroll
+    for (uint32_t fkv = 0; fkv < NUM_FRAGS_KV; ++fkv) {
+#pragma unroll
+      for (uint32_t reg_id = 0; reg_id < 8; ++reg_id) {
+        const uint32_t q_idx = q[fq][(reg_id % 4) / 2], kv_idx = kv_idx_base + fkv * 16 +
+                                                                 2 * (lane_idx % 4) +
+                                                                 8 * (reg_id / 4) + reg_id % 2;
+        const uint32_t qo_head_idx = kv_head_idx * group_size + r[fq][(reg_id % 4) / 2];
+        // kv_idx + qo_len > kv_len + q_idx 是 casual 的判定规则
+        // kv_position[k_idx] <= q_position[q_idx] 是我要的判定规则，这里面也存在两次访存
+        const bool mask =
+            (!(MASK_MODE == MaskMode::kCausal
+                   ? (kv_idx + qo_len > kv_len + q_idx || (kv_idx >= chunk_end))
+                   : (MASK_MODE == MaskMode::kCustomCausal ? (q_position[q_idx] > kv_position[kv_idx] || (kv_idx >= chunk_end))
+                   : kv_idx >= chunk_end))) &&
+            variant.LogitsMask(params, batch_idx, q_idx, kv_idx, qo_head_idx, kv_head_idx);
+        s_frag[fq][fkv][reg_id] =
+            (mask) ? s_frag[fq][fkv][reg_id]
+                   : (variant.use_softmax ? DTypeQKAccum(-math::inf) : DTypeQKAccum(0.f));
+      }
+    }
+  }
+}
+
+
+template <MaskMode MASK_MODE, uint32_t NUM_FRAGS_Q, uint32_t NUM_FRAGS_D, uint32_t NUM_FRAGS_KV,
           typename AttentionVariant, typename DTypeQKAccum>
 __device__ __forceinline__ void logits_mask(const typename AttentionVariant::ParamsT& params,
                                             AttentionVariant variant, const uint32_t batch_idx,
@@ -1761,7 +1809,7 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithRag
         ceil_div(sub_if_greater_or_zero(kv_len + (qo_tile_idx + 1) * num_rows_per_cta,
                                         qo_len + window_left + chunk_start),
                  (16 * NUM_WARPS_KV * NUM_FRAGS_KV));
-
+                    
     const uint32_t mask_iteration =
         (MASK_MODE == MaskMode::kCausal
              ? min(chunk_size, sub_if_greater_or_zero(
@@ -2080,7 +2128,7 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
     cp_async::commit_group();
 
     const uint32_t num_iterations = ceil_div(
-        (MASK_MODE == MaskMode::kCausal
+        (MASK_MODE == MaskMode::kCausal || MASK_MODE == MaskMode::kCustomCausal
              ? min(chunk_size,
                    sub_if_greater_or_zero(
                        kv_len - qo_len + ((qo_tile_idx + 1) * num_rows_per_cta) / group_size,
@@ -2094,7 +2142,7 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
                  (16 * NUM_WARPS_KV * NUM_FRAGS_KV));
 
     const uint32_t mask_iteration =
-        (MASK_MODE == MaskMode::kCausal
+        (MASK_MODE == MaskMode::kCausal || MASK_MODE == MaskMode::kCustomCausal
              ? min(chunk_size, sub_if_greater_or_zero(
                                    kv_len + (qo_tile_idx * num_rows_per_cta) / group_size - qo_len,
                                    chunk_start))
@@ -2152,11 +2200,11 @@ __launch_bounds__(NUM_WARPS_Q* NUM_WARPS_KV* WARP_SIZE) void BatchPrefillWithPag
 
       // apply mask
       if (MASK_MODE == MaskMode::kCustom || (iter >= mask_iteration || iter < window_iteration)) {
-        logits_mask<MASK_MODE, NUM_FRAGS_Q, NUM_FRAGS_D, NUM_FRAGS_KV>(
+        custom_logits_mask<MASK_MODE, NUM_FRAGS_Q, NUM_FRAGS_D, NUM_FRAGS_KV>(
             params, variant, /*batch_idx=*/request_idx, qo_packed_idx_base,
             chunk_start + (iter * NUM_WARPS_KV + get_warp_idx_kv<NUM_WARPS_Q, NUM_WARPS_KV>()) *
                               NUM_FRAGS_KV * 16,
-            qo_len, kv_len, chunk_end, group_size, s_frag);
+            qo_len, kv_len, chunk_end, group_size, s_frag, /*q_position=*/q_offset, /*kv_position=*/kv_position);
       }
 
       // compute m,d states in online softmax

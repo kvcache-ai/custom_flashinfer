@@ -10,9 +10,9 @@ head_dim = 128
 max_num_pages = 150
 page_size = 256
 inf = 32768
-batch_size = 3
-recompute_ratio = 0.5
-max_chunk_num = 20
+batch_size = 1
+recompute_ratio = 0
+max_chunk_num = 1
 max_chunk_length = 1024
 import math
 torch.manual_seed(42)
@@ -189,8 +189,8 @@ for mini_batch in range(batch_size):
     sub_position = torch.tensor([], dtype=torch.int32, device="cuda:0")
     chunk_num = random.randint(1, max_chunk_num)
     for chunk_index in range(chunk_num):
-        # chunk_length = page_size
-        chunk_length = random.randint(max_chunk_length // 2, max_chunk_length)
+        chunk_length = page_size
+        # chunk_length = random.randint(max_chunk_length // 2, max_chunk_length)
         sub_critical_position = get_sorted_unique_indices(chunk_length, recompute_ratio)
         sub_critical_position = last_position + torch.tensor(sub_critical_position, dtype=torch.int32, device="cuda:0")
         
@@ -271,17 +271,18 @@ assert len(k) == len(position)
 attached_k = []
 attached_v = []
 attached_paged_num = 0
-for i, sub_critical_position in enumerate(sub_critical_positions):
-    sub_paged_num = math.ceil(len(sub_critical_position) / page_size)
-    last_page_len = attached_kv_last_page_len[i]
-    attached_k.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num:attached_paged_num+sub_paged_num-1],0,:,:,:].reshape(-1, num_kv_heads, head_dim))
-    attached_v.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num:attached_paged_num+sub_paged_num-1],1,:,:,:].reshape(-1, num_kv_heads, head_dim))
-    attached_k.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num+sub_paged_num-1],0,:,:,:].reshape(-1, num_kv_heads, head_dim)[:last_page_len])
-    attached_v.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num+sub_paged_num-1],1,:,:,:].reshape(-1, num_kv_heads, head_dim)[:last_page_len])
-    attached_paged_num += sub_paged_num
-attached_k = torch.cat(attached_k)
-attached_v= torch.cat(attached_v)
-assert len(attached_k) == len(attached_position)
+
+# for i, sub_critical_position in enumerate(sub_critical_positions):
+#     sub_paged_num = math.ceil(len(sub_critical_position) / page_size)
+#     last_page_len = attached_kv_last_page_len[i]
+#     attached_k.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num:attached_paged_num+sub_paged_num-1],0,:,:,:].reshape(-1, num_kv_heads, head_dim))
+#     attached_v.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num:attached_paged_num+sub_paged_num-1],1,:,:,:].reshape(-1, num_kv_heads, head_dim))
+#     attached_k.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num+sub_paged_num-1],0,:,:,:].reshape(-1, num_kv_heads, head_dim)[:last_page_len])
+#     attached_v.append(kv_cache_at_layer[0,attached_paged_kv_indices[attached_paged_num+sub_paged_num-1],1,:,:,:].reshape(-1, num_kv_heads, head_dim)[:last_page_len])
+#     attached_paged_num += sub_paged_num
+# attached_k = torch.cat(attached_k)
+# attached_v= torch.cat(attached_v)
+# assert len(attached_k) == len(attached_position)
     
 
 
@@ -301,12 +302,7 @@ standard_output = standard_output[0].transpose(0, 1).contiguous()
 
 
 
-cos, sin = rotary_emb(attached_k.unsqueeze(0).transpose(1,2), attached_position.unsqueeze(0).to('cuda:0'))
-rope_attached_k = apply_rotary_pos_emb(attached_k.unsqueeze(0).transpose(1,2), cos, sin)
-# standard_output = caculate_qkvo(q.transpose(1, 2), k.unsqueeze(0).transpose(1,2), v.unsqueeze(0).transpose(1,2), sub_q_positions, sub_kv_positions, sub_critical_poses, )
 
-standard_attached_output = caculate_qkvo(rope_q, rope_attached_k, attached_v.unsqueeze(0).transpose(1,2), sub_q_positions, sub_critical_positions, sub_critical_poses = [] )
-standard_attached_output = standard_attached_output[0].transpose(0, 1).contiguous()
 # print('standard_output')
 # print(f'{standard_output}')
 # flashinfer 
@@ -320,6 +316,9 @@ prefill_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(
 mask=create_mask_for_batch(sub_q_positions, sub_kv_positions, sub_critical_poses,)
 mask=mask.flatten()
 
+mask = None 
+if mask == None:
+    kv_position[critical_pos] = inf
 prefill_wrapper.plan(
     qo_indptr,
     paged_kv_indptr,
@@ -332,6 +331,7 @@ prefill_wrapper.plan(
     head_dim,
     page_size,
     custom_mask=mask,
+    causal=False,
     pos_encoding_mode="ROPE_LLAMA",
 )
 
@@ -345,38 +345,5 @@ print(torch.allclose(flashinfer_output, standard_output, rtol=1e-2, atol=1e-2))
 abs_difference = torch.abs(flashinfer_output-standard_output)
 max_abs_difference = torch.max(abs_difference)
 print(f'only rope, no attached page merge, max difference: {max_abs_difference}')
-# attached_kv_indptr = torch.tensor([0,len(attached_paged_kv_indices)], dtype=torch.int32, device="cuda:0")
-# attached_paged_kv_last_page_len=torch.tensor([len(critical_position) % page_size if len(critical_position) % page_size != 0 else page_size], dtype=torch.int32, device="cuda:0")
-# attached_mask = create_mask_from_position_for_flashinfer(q_position, critical_position, [])
-# attached_mask = attached_mask.flatten()
-attached_mask=create_mask_for_batch(sub_q_positions, sub_critical_positions, [])
-attached_mask=attached_mask.flatten()
-prefill_wrapper.plan(
-    qo_indptr,
-    attached_kv_indptr,
-    attached_paged_kv_indices,
-    attached_kv_last_page_len,
-    torch.tensor(batch_size,dtype=torch.int32).to('cuda:0'),
-    torch.tensor(attached_position.shape[0], dtype=torch.int32).to('cuda:0'),
-    num_qo_heads,
-    num_kv_heads,
-    head_dim,
-    page_size,
-    custom_mask=attached_mask,
-    pos_encoding_mode="ROPE_LLAMA",
-)
-attached_flashinfer_output,attached_lse = prefill_wrapper.run(q[0], kv_cache_at_layer[0], return_lse=True, q_position=q_position, kv_position=critical_position)
-abs_difference = torch.abs(standard_attached_output-attached_flashinfer_output)
-max_abs_difference = torch.max(abs_difference)
-print(f'attached: {max_abs_difference}')
-entire_output,_ = merge_state(flashinfer_output, lse, attached_flashinfer_output, attached_lse)
-cos, sin = rotary_emb(k.unsqueeze(0).transpose(1,2), kv_position.unsqueeze(0).to('cuda:0'))
-rope_k = apply_rotary_pos_emb(k.unsqueeze(0).transpose(1,2), cos, sin)
-merge_standard_output = caculate_qkvo(rope_q, rope_k, v.unsqueeze(0).transpose(1,2), sub_q_positions, sub_kv_positions, [])
-merge_standard_output = merge_standard_output[0].transpose(0, 1).contiguous()
-abs_difference = torch.abs(merge_standard_output-entire_output)
-max_abs_difference = torch.max(abs_difference)
-print(f'rope, position max difference: {max_abs_difference}')
-print(torch.allclose(entire_output, merge_standard_output, rtol=1e-2, atol=1e-2))
-print(f"prompt length: {len(position)}")
-print('')
+print(111)
+

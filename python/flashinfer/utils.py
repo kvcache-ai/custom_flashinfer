@@ -36,6 +36,7 @@ class MaskMode(Enum):
     NON_CAUSAL = 0
     CAUSAL = 1
     CUSTOM = 2
+    CUSTOMCAUSAL = 3
 
 
 class TensorLayout(Enum):

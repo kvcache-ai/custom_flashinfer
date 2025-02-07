@@ -158,6 +158,11 @@
       __VA_ARGS__                                             \
       break;                                                  \
     }                                                         \
+    case MaskMode::kCustomCausal: {                           \
+      constexpr MaskMode MASK_MODE = MaskMode::kCustomCausal; \
+      __VA_ARGS__                                             \
+      break;                                                  \
+    }                                                         \
     default: {                                                \
       std::ostringstream err_msg;                             \
       err_msg << "Unsupported mask_mode: " << int(mask_mode); \
