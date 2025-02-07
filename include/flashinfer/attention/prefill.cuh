@@ -787,6 +787,8 @@ __device__ __forceinline__ void logits_mask(const typename AttentionVariant::Par
                                                                  2 * (lane_idx % 4) +
                                                                  8 * (reg_id / 4) + reg_id % 2;
         const uint32_t qo_head_idx = kv_head_idx * group_size + r[fq][(reg_id % 4) / 2];
+        // kv_idx + qo_len > kv_len + q_idx 是 casual 的判定规则
+        // kv_position[k_idx] <= q_position[q_idx] 是我要的判定规则，这里面也存在两次访存
         const bool mask =
             (!(MASK_MODE == MaskMode::kCausal
                    ? (kv_idx + qo_len > kv_len + q_idx || (kv_idx >= chunk_end))

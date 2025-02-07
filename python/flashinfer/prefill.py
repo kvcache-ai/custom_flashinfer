@@ -738,6 +738,12 @@ class BatchPrefillWithPagedKVCacheWrapper:
         num_tokens_tensor_buf: Optional[torch.Tensor] = None,
         custom_mask_buf: Optional[torch.Tensor] = None,
         qk_indptr_buf: Optional[torch.Tensor] = None,
+		mask_len_buf: Optional[torch.Tensor] = None,
+        q_position_buf: Optional[torch.Tensor] = None,
+		batch_indices_buf: Optional[torch.Tensor] = None,
+		cache_position_buf: Optional[torch.Tensor] = None,
+		kv_position_buf: Optional[torch.Tensor] = None,
+		k_len_buf: Optional[torch.Tensor] = None,
     ) -> None:
         r"""Constructor of :class:`BatchPrefillWithPagedKVCacheWrapper`.
 
@@ -853,6 +859,13 @@ class BatchPrefillWithPagedKVCacheWrapper:
         self._custom_mask_buf = custom_mask_buf
         self._qk_indptr_buf = qk_indptr_buf
         self._plan_info = None
+        self._mask_len_buf = mask_len_buf
+        self._q_position_buf=q_position_buf
+        self._batch_indices_buf=batch_indices_buf
+        self._cache_position_buf=cache_position_buf
+        self._kv_position_buf = kv_position_buf
+        self._k_len_buf = k_len_buf
+        
 
     @property
     def is_cuda_graph_enabled(self) -> bool:
@@ -905,6 +918,12 @@ class BatchPrefillWithPagedKVCacheWrapper:
         rope_theta: Optional[float] = None,
         q_data_type: Union[str, torch.dtype] = "float16",
         kv_data_type: Optional[Union[str, torch.dtype]] = None,
+        mask_len: Optional[torch.Tensor] = None,
+		kv_position: Optional[torch.Tensor] = None,
+		k_len: Optional[torch.Tensor] = None,
+		q_position: Optional[torch.Tensor] = None,
+		batch_indices: Optional[torch.Tensor] = None,
+		cache_positions: Optional[torch.Tensor] = None,
     ) -> None:
         r"""Plan batch prefill/append attention on Paged KV-Cache for given problem specification.
 
@@ -1008,7 +1027,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         if packed_custom_mask is None and custom_mask is not None:
             # create packed custom mask from custom mask
             packed_custom_mask, qk_indptr = segment_packbits(
-                custom_mask.contiguous().view(-1),
+                custom_mask[:mask_len].contiguous().view(-1),
                 qk_indptr,
                 bitorder="little",
             )
@@ -1028,6 +1047,14 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 raise ValueError(
                     "The length of paged_kv_indices exceeds the allocated buffer size."
                 )
+
+            # 新增
+            self._kv_position_buf[:k_len].copy_(kv_position, non_blocking=True)
+            self._q_position_buf[:q_position.shape[0]].copy_(q_position, non_blocking=True)
+            self._batch_indices_buf[:batch_indices.shape[0]].copy_(batch_indices, non_blocking=True)
+            self._cache_position_buf[:cache_positions.shape[0]].copy_(cache_positions, non_blocking=True)
+            self._mask_len_buf.copy_(mask_len, non_blocking=True)
+            self._k_len_buf.copy_(k_len, non_blocking=True)
 
             self._qo_indptr_buf[:batch_size+1].copy_(qo_indptr, non_blocking=True)
             self._paged_kv_indptr_buf[:batch_size+1].copy_(paged_kv_indptr, non_blocking=True)

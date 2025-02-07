@@ -99,7 +99,11 @@ struct CustomMaskAttention {
                                              uint32_t qo_idx, uint32_t kv_idx, uint32_t qo_head_idx,
                                              uint32_t kv_head_idx) {
     const uint32_t offset = qo_idx * kv_len + kv_idx;
-    return ((custom_mask_ptr[offset / 8] >> (offset % 8)) & 1);
+    const uint32_t byte_idx = offset >> 3;    // equivalent to idx / 8
+    const uint32_t bit_idx  = offset & 7;       // equivalent to idx % 8
+    const uint8_t mask_byte = __ldg(reinterpret_cast<const uint8_t*>(custom_mask_ptr + byte_idx));
+    return ((mask_byte >> bit_idx) & 1);
+    // return ((custom_mask_ptr[offset / 8] >> (offset % 8)) & 1);
   }
 };
 
