@@ -1260,7 +1260,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         if rope_scale is None:
             rope_scale = 1.0
         if rope_theta is None:
-            rope_theta = 1e4
+            rope_theta = 1e6
         lse = None
         if return_lse:
             lse = torch.empty(
