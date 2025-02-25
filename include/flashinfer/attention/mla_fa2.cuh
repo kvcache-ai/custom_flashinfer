@@ -820,9 +820,10 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
   const uint32_t o_stride_n = params.o_stride_n;
   const uint32_t o_stride_h = params.o_stride_h;
   const uint32_t cluster_tile_q = gridDim.x * KTraits::CTA_TILE_Q;
+  const uint32_t bsz_num = params.bsz_tensor[0];
 
 #pragma unroll 1
-  for (IdType work_idx = work_indptr[blockIdx.y]; work_idx < work_indptr[blockIdx.y + 1];
+  for (IdType work_idx = work_indptr[blockIdx.y]; work_idx < work_indptr[blockIdx.y + 1] && work_idx < bsz_num;
        ++work_idx) {
     const uint32_t q_indptr = params.q_indptr[work_idx];
     const uint32_t kv_indptr = params.kv_indptr[work_idx];

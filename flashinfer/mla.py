@@ -113,6 +113,7 @@ class BatchMLAPagedAttentionWrapper:
         kv_indptr: Optional[torch.Tensor] = None,
         kv_indices: Optional[torch.Tensor] = None,
         kv_len_arr: Optional[torch.Tensor] = None,
+        bsz_tensor: Optional[torch.Tensor] = None,
         backend: str = "fa2",
     ) -> None:
         r"""Constructor for BatchMLAPagedAttentionWrapper.
@@ -160,6 +161,7 @@ class BatchMLAPagedAttentionWrapper:
         self._kv_indptr_buf = kv_indptr
         self._kv_indices_buf = kv_indices
         self._kv_len_arr_buf = kv_len_arr
+        self._bsz_tensor = bsz_tensor
 
     def plan(
         self,
@@ -175,6 +177,7 @@ class BatchMLAPagedAttentionWrapper:
         sm_scale: float,
         q_data_type: torch.dtype,
         kv_data_type: torch.dtype,
+        bsz_tensor: torch.Tensor,
     ) -> None:
         r"""Plan the MLA attention computation.
 
@@ -206,6 +209,8 @@ class BatchMLAPagedAttentionWrapper:
             The data type of the query tensor.
         kv_data_type : torch.dtype
             The data type of the kv-cache tensor.
+        bsz_tensor: torch.Tensor shape [1]
+            The num of batch size in minibatch
         """
         self._cached_module = get_batch_mla_module(
             q_data_type,
@@ -220,15 +225,17 @@ class BatchMLAPagedAttentionWrapper:
         kv_len_arr_host = kv_len_arr.to("cpu")
 
         if self._use_cuda_graph:
-            self._qo_indptr_buf.copy_(qo_indptr, non_blocking=True)
-            self._kv_indptr_buf.copy_(kv_indptr, non_blocking=True)
+            self._qo_indptr_buf[:len(qo_indptr)].copy_(qo_indptr, non_blocking=True)
+            self._kv_indptr_buf[:len(kv_indptr)].copy_(kv_indptr, non_blocking=True)
             self._kv_indices_buf[: len(kv_indices)].copy_(kv_indices, non_blocking=True)
-            self._kv_len_arr_buf.copy_(kv_len_arr, non_blocking=True)
+            self._kv_len_arr_buf[:len(kv_len_arr)].copy_(kv_len_arr, non_blocking=True)
+            self._bsz_tensor.copy_(bsz_tensor, non_blocking=True)
         else:
             self._qo_indptr_buf = qo_indptr.to(self.device, non_blocking=True)
             self._kv_indptr_buf = kv_indptr.to(self.device, non_blocking=True)
             self._kv_indices_buf = kv_indices.to(self.device, non_blocking=True)
             self._kv_len_arr_buf = kv_len_arr.to(self.device, non_blocking=True)
+            self._bsz_tensor = bsz_tensor.to(self.device, non_blocking=True)
         self._causal = causal
         self._page_size = page_size
         self._sm_scale = sm_scale
@@ -336,6 +343,7 @@ class BatchMLAPagedAttentionWrapper:
                 page_size,
                 sm_scale,
                 get_cuda_stream(device),
+                self._bsz_tensor,
             )
 
         return (out, lse) if return_lse else out
