@@ -15,17 +15,20 @@
  */
 #include "pytorch_extension_utils.h"
 
-void rmsnorm(at::Tensor& out, at::Tensor& input, at::Tensor& weight, double eps,
-             int64_t cuda_stream);
+#include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <torch/extension.h>
 
-void fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight, double eps,
-                       int64_t cuda_stream);
+void rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight, 
+    torch::Tensor& batch_size_tensor, double eps);
 
-void gemma_rmsnorm(at::Tensor& out, at::Tensor& input, at::Tensor& weight, double eps,
-                   int64_t cuda_stream);
+void fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Tensor& weight,
+    torch::Tensor& batch_size_tensor, double eps);
 
-void gemma_fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight,
-                             double eps, int64_t cuda_stream);
+void gemma_rmsnorm(torch::Tensor& output, torch::Tensor& input, torch::Tensor& weight, double eps);
+
+void gemma_fused_add_rmsnorm(torch::Tensor& input, torch::Tensor& residual, torch::Tensor& weight,
+    double eps);
 
 TORCH_LIBRARY_FRAGMENT(TORCH_EXTENSION_NAME, m) {
   // Root mean square normalization
