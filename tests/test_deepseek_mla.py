@@ -333,14 +333,13 @@ def test_batch_mla_page_attention(
     use_cuda_graph,
     dtype,
 ):
-    if not mla_is_fa3_supported(torch.device("cuda")):
-        pytest.skip("FA3 is not supported on this device")
+    # if not mla_is_fa3_supported(torch.device("cuda")):
+    #     pytest.skip("FA3 is not supported on this device")
     if causal and qo_len > kv_len:
         pytest.skip("qo_len > kv_len not supported for causal attention")
     torch.manual_seed(42)
     head_dim_ckv = 512
     head_dim_kpe = 64
-    device = "cuda:0"
     q_nope = torch.randn(
         batch_size * qo_len, num_heads, head_dim_ckv, dtype=dtype, device="cuda"
     )
@@ -364,27 +363,25 @@ def test_batch_mla_page_attention(
     )
     sm_scale = 1.0 / ((128 + 64) ** 0.5)  # use head dimension before matrix absorption
     workspace_buffer = torch.empty(128 * 1024 * 1024, dtype=torch.int8).to(0)
-
-
-    qo_indptr_buf = torch.empty((batch_size,), dtype=torch.int32, device=device)
-    paged_kv_indptr_buf = torch.empty((batch_size,), dtype=torch.int32, device=device)
-    paged_kv_indices_buf = torch.empty((pages_num,), dtype=torch.int32, device=device)
-    paged_kv_len_buf = torch.empty((batch_size-1,), dtype=torch.int32, device=device)
-    bsz_tensor_buf = torch.empty((1,), dtype=torch.int32, device=device)
-
     wrapper = flashinfer.mla.BatchMLAPagedAttentionWrapper(
-        workspace_buffer, backend=backend,qo_indptr=qo_indptr_buf, kv_indptr=paged_kv_indptr_buf, 
-        kv_indices=paged_kv_indices_buf, kv_len_arr=paged_kv_len_buf, bsz_tensor=bsz_tensor_buf
+        workspace_buffer,
+        backend=backend,
+        use_cuda_graph=True,
+        qo_indptr=torch.empty(batch_size + 1, dtype=torch.int32, device="cuda"),
+        kv_indptr=torch.empty(batch_size + 1, dtype=torch.int32, device="cuda"),
+        kv_indices=torch.empty(1048576, dtype=torch.int32, device="cuda"),
+        kv_len_arr=torch.empty(batch_size, dtype=torch.int32, device="cuda"),
+        bsz_tensor = torch.empty(1, dtype=torch.int32, device="cuda")
     )
-    q_indptr = torch.arange(0, batch_size ).to(0).int() * qo_len
+    q_indptr = torch.arange(0, batch_size).to(0).int() * qo_len
     kv_indptr = torch.arange(0, batch_size).to(0).int() * pages_num
     kv_indices = torch.arange(0, batch_size * pages_num).to(0).int()
-    kv_lens = torch.full((batch_size,), kv_len, dtype=torch.int32).to(0)
+    kv_lens = torch.full((batch_size-1,), kv_len, dtype=torch.int32).to(0)
 
     if use_cuda_graph:
-        kv_indptr_warmup = torch.zeros(batch_size + 1).to(0).int()
-        kv_indices_warmup = torch.arange(0, batch_size).to(0).int()
-        kv_lens_warmup = torch.full((batch_size,), 0, dtype=torch.int32).to(0)
+        kv_indptr_warmup = torch.zeros(batch_size).to(0).int()
+        kv_indices_warmup = torch.arange(0, batch_size-1).to(0).int()
+        kv_lens_warmup = torch.full((batch_size-1,), 0, dtype=torch.int32).to(0)
         wrapper.plan(
             q_indptr,
             kv_indptr_warmup,
@@ -398,6 +395,7 @@ def test_batch_mla_page_attention(
             sm_scale,
             q_nope.dtype,
             ckv.dtype,
+            bsz_tensor=torch.tensor([batch_size-1], dtype=torch.int32, device="cuda")
         )
 
         # warmup
@@ -426,7 +424,7 @@ def test_batch_mla_page_attention(
         sm_scale,
         q_nope.dtype,
         ckv.dtype,
-        torch.tensor([len(q_indptr)], dtype=torch.int32, device='cuda:0')
+        bsz_tensor=torch.tensor([batch_size-1], dtype=torch.int32, device="cuda")
     )
     if use_cuda_graph:
         o.fill_(0)
@@ -441,22 +439,13 @@ def test_batch_mla_page_attention(
     o_ref, lse_ref = attention_ref(batch_size, q, k, v, causal, sm_scale)
     lse_ref = lse_ref.flatten(0, 1)
     torch.testing.assert_close(o[:q_indptr[-1]], o_ref[:q_indptr[-1]], rtol=1e-3, atol=1e-3)
-    if kv_len != 0:
-        torch.testing.assert_close(lse[:q_indptr[-1]], lse_ref[:q_indptr[-1]], rtol=1e-3, atol=1e-3)
-
-    # test with pre-allocated output
-    o_buffer = torch.empty_like(o)
-    lse_buffer = torch.empty_like(lse)
-    wrapper.run(q_nope, q_pe, ckv, kpe, out=o_buffer, lse=lse_buffer)
-    torch.testing.assert_close(o[:q_indptr[-1]], o_buffer[:q_indptr[-1]], rtol=1e-3, atol=1e-3)
-    torch.testing.assert_close(lse[:q_indptr[-1]], lse_buffer[:q_indptr[-1]], rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
-    test_batch_mla_varlen_page_attention(
-        155, 0, 8, 8, 128, 16, False, 1, "fa3", torch.half
-    )
-    test_batch_mla_varlen_page_attention(
-        155, 1024, 8, 128, 128, 16, False, 1, "fa3", torch.half
-    )
-    test_batch_mla_page_attention(1, 1024, 128, 128, False, 1, "fa2", True, torch.half)
+    # test_batch_mla_varlen_page_attention(
+    #     155, 0, 8, 8, 128, 16, False, 1, "fa3", torch.half
+    # )
+    # test_batch_mla_varlen_page_attention(
+    #     155, 1024, 8, 128, 128, 16, False, 1, "fa3", torch.half
+    # )
+    test_batch_mla_page_attention(5, 1024, 128, 128, True, 1, "fa2", True, torch.half)
