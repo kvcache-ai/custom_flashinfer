@@ -44,12 +44,11 @@ struct SharedStorageQKVO {
   union {
     struct {
       alignas(16) DTypeQ q_smem_nope[CTA_TILE_Q * HEAD_DIM_CKV];
-      alignas(16) DTypeKV ckv_smem[NUM_STAGES][CTA_TILE_KV * HEAD_DIM_CKV];
       alignas(16) DTypeQ q_smem_pe[CTA_TILE_Q * HEAD_DIM_KPE];
-      union {
-        alignas(16) DTypeKV kpe[CTA_TILE_KV * HEAD_DIM_KPE];
-        alignas(16) DTypeKV p[CTA_TILE_Q * CTA_TILE_KV];
-      } aux_smem[NUM_STAGES];
+      alignas(16) DTypeKV ckv_smem[NUM_STAGES][CTA_TILE_KV * HEAD_DIM_CKV];
+      alignas(16) DTypeKV
+          kpe_p_smem[NUM_STAGES]
+                    [CTA_TILE_KV * (HEAD_DIM_KPE > CTA_TILE_Q ? HEAD_DIM_KPE : CTA_TILE_Q)];
       union {
         alignas(16) float m_wg[2][CTA_TILE_Q];  // cross warpgroup synchronization
         alignas(16) float d_wg[2][CTA_TILE_Q];  // cross warpgroup synchronization
@@ -191,7 +190,7 @@ __device__ __forceinline__ void load_kv(
   const uint32_t warp_idx_in_wg = threadIdx.y;
 
   smem_t<KTraits::SWIZZLE_MODE_CKV> ckv_smem(smem_storage->ckv_smem[stage_idx]);
-  smem_t<KTraits::SWIZZLE_MODE_KPE> kpe_smem(smem_storage->aux_smem[stage_idx].kpe);
+  smem_t<KTraits::SWIZZLE_MODE_KPE> kpe_smem(smem_storage->kpe_p_smem[stage_idx]);
 
   if constexpr (KTraits::NUM_MMA_KV == 1) {
     if (warpgroup_idx == 0) {
@@ -465,7 +464,7 @@ __device__ __forceinline__ void compute_mla_qk(typename KTraits::SharedStorage* 
   smem_t<KTraits::SWIZZLE_MODE_Q_NOPE> q_smem_nope(smem_storage->q_smem_nope);
   smem_t<KTraits::SWIZZLE_MODE_Q_PE> q_smem_pe(smem_storage->q_smem_pe);
   smem_t<KTraits::SWIZZLE_MODE_CKV> ckv_smem(smem_storage->ckv_smem[stage_idx]);
-  smem_t<KTraits::SWIZZLE_MODE_KPE> kpe_smem(smem_storage->aux_smem[stage_idx].kpe);
+  smem_t<KTraits::SWIZZLE_MODE_KPE> kpe_smem(smem_storage->kpe_p_smem[stage_idx]);
   const uint32_t lane_idx = threadIdx.x, warpgroup_idx = threadIdx.z, warp_idx_in_wg = threadIdx.y;
   compute_qk_</*init=*/true, KTraits, KTraits::NUM_MMA_D_KPE, KTraits::UPCAST_STRIDE_Q_PE,
               KTraits::UPCAST_STRIDE_KPE>(q_smem_pe, kpe_smem, s_frag);
@@ -496,7 +495,7 @@ __device__ __forceinline__ void compute_mla_pv(typename KTraits::SharedStorage* 
     }
 
     __syncthreads();
-    smem_t<KTraits::SWIZZLE_MODE_P> p_smem(smem_storage->aux_smem[stage_idx].p);
+    smem_t<KTraits::SWIZZLE_MODE_P> p_smem(smem_storage->kpe_p_smem[stage_idx]);
     constexpr uint32_t UPCAST_STRIDE_P = KTraits::UPCAST_STRIDE_P;
 #pragma unroll
     for (uint32_t mma_kv = 0; mma_kv < NUM_MMA_KV / 2; ++mma_kv) {
@@ -616,33 +615,32 @@ __device__ __forceinline__ void finalize_m_(typename KTraits::AttentionVariant v
 }
 
 template <typename KTraits>
-__device__ void DevicePersistentMergeStates(typename KTraits::IdType* merge_packed_offset_start,
-                                            typename KTraits::IdType* merge_packed_offset_end,
-                                            typename KTraits::IdType* merge_indptr,
-                                            float* partial_o, float* partial_lse,
-                                            typename KTraits::DTypeO* final_o, float* final_lse,
-                                            const uint32_t o_stride_n, const uint32_t o_stride_h,
-                                            const uint32_t cluster_tile_q,
-                                            const uint_fastdiv& num_heads) {
+__device__ void DevicePersistentMergeStates(
+    typename KTraits::IdType* merge_packed_offset_start,
+    typename KTraits::IdType* merge_packed_offset_end,
+    typename KTraits::IdType* merge_partial_packed_offset_start,
+    typename KTraits::IdType* merge_partial_packed_offset_end,
+    typename KTraits::IdType* merge_partial_stride, float* partial_o, float* partial_lse,
+    typename KTraits::DTypeO* final_o, float* final_lse, const uint32_t o_stride_n,
+    const uint32_t o_stride_h, const uint_fastdiv& num_heads) {
   constexpr uint32_t VEC_SIZE = 4;  // partial o has data type float
   constexpr uint32_t NUM_THRS_PER_ROW = KTraits::HEAD_DIM_CKV / VEC_SIZE;
   constexpr uint32_t ROWS_PER_ITERATION = (KTraits::NUM_THREADS) / NUM_THRS_PER_ROW;
-  const uint32_t cluster_id = blockIdx.y;
+  const uint32_t cta_idx = (gridDim.x * blockIdx.y + blockIdx.x);
   const uint32_t thread_id = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
-  const uint32_t offset_start = merge_packed_offset_start[cluster_id];
-  const uint32_t offset_end = merge_packed_offset_end[cluster_id];
-  const uint32_t partial_offset_start = merge_indptr[cluster_id];
-  const uint32_t partial_offset_end = merge_indptr[cluster_id + 1];
-  const uint32_t stride = offset_end - offset_start;
+  const uint32_t offset_start = merge_packed_offset_start[cta_idx];
+  const uint32_t len = merge_packed_offset_end[cta_idx] - offset_start;
+  const uint32_t partial_offset_start = merge_partial_packed_offset_start[cta_idx];
+  const uint32_t partial_offset_end = merge_partial_packed_offset_end[cta_idx];
+  const uint32_t stride = merge_partial_stride[cta_idx];
 #pragma unroll 1
-  for (uint32_t local_packed_offset =
-           blockIdx.x * ROWS_PER_ITERATION + thread_id / NUM_THRS_PER_ROW;
-       local_packed_offset < stride; local_packed_offset += gridDim.x * ROWS_PER_ITERATION) {
+  for (uint32_t local_packed_offset = thread_id / NUM_THRS_PER_ROW; local_packed_offset < len;
+       local_packed_offset += ROWS_PER_ITERATION) {
     uint32_t final_packed_offset = offset_start + local_packed_offset;
     uint32_t q, r;
     num_heads.divmod(final_packed_offset, q, r);
     state_t<VEC_SIZE> st;
-#pragma unroll 2
+#pragma unroll 8
     for (uint32_t partial_packed_offset = partial_offset_start + local_packed_offset;
          partial_packed_offset < partial_offset_end; partial_packed_offset += stride) {
       vec_t<float, VEC_SIZE> o_partial;
@@ -788,7 +786,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
   [[maybe_unused]] constexpr uint32_t NUM_MMA_D_CKV = KTraits::NUM_MMA_D_CKV;
   [[maybe_unused]] constexpr uint32_t CTA_TILE_Q = KTraits::CTA_TILE_Q;
   [[maybe_unused]] constexpr uint32_t CTA_TILE_KV = KTraits::CTA_TILE_KV;
-  [[maybe_unused]] constexpr uint32_t NUM_STAGES = KTraits::NUM_STAGES;
+  [[maybe_unused]] constexpr int32_t NUM_STAGES = KTraits::NUM_STAGES;
   [[maybe_unused]] constexpr bool CAUSAL = KTraits::CAUSAL;
 
   DTypeQ* q_nope = params.q_nope;
@@ -969,10 +967,11 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
   grid.sync();
 
   // the second stage, merge partial outputs
-  DevicePersistentMergeStates<KTraits>(params.merge_packed_offset_start,
-                                       params.merge_packed_offset_end, params.merge_indptr,
-                                       partial_o, partial_lse, final_o, final_lse, o_stride_n,
-                                       o_stride_h, cluster_tile_q, num_heads);
+  DevicePersistentMergeStates<KTraits>(
+      params.merge_packed_offset_start, params.merge_packed_offset_end,
+      params.merge_partial_packed_offset_start, params.merge_partial_packed_offset_end,
+      params.merge_partial_stride, partial_o, partial_lse, final_o, final_lse, o_stride_n,
+      o_stride_h, num_heads);
 }
 
 #define DISPATCH_SMEM_CONFIG(smem_limit_per_sm, NUM_STAGES, CTA_TILE_KV, QK_SHARD, ...) \
@@ -1009,10 +1008,6 @@ cudaError_t BatchMLAPagedAttention(Params params, uint32_t num_blks_x, uint32_t 
     return cudaErrorNotSupported;
   }
   constexpr bool CAUSAL = MASK_MODE == MaskMode::kCausal;
-
-  using DTypeQ = typename Params::DTypeQ;
-  using DTypeKV = typename Params::DTypeKV;
-  using DTypeO = typename Params::DTypeO;
 
   dim3 nblks(num_blks_x, num_blks_y);
   dim3 nthrs(32, 4, 2);

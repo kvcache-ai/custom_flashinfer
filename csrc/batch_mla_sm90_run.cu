@@ -13,23 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <flashinfer/attention/mla.cuh>
+#include <flashinfer/attention/mla_hopper.cuh>
 #include <flashinfer/attention/scheduler.cuh>
 #include <flashinfer/fastdiv.cuh>
 #include <optional>
 
-#include "batch_mla_config.inc"
+#include "batch_mla_sm90_config.inc"
 #include "pytorch_conversion_utils.h"
 #include "pytorch_extension_utils.h"
 
 using namespace flashinfer;
 
-void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
-                               at::Tensor plan_info_vec, at::Tensor q_nope, at::Tensor q_pe,
-                               at::Tensor ckv_cache, at::Tensor kpe_cache, at::Tensor kv_indices,
-                               at::Tensor o, std::optional<at::Tensor> maybe_lse,
-                               int64_t mask_mode_code, int64_t num_heads, int64_t page_size,
-                               double sm_scale, int64_t cuda_stream, at::Tensor bsz_tensor) {
+void BatchMLAPagedAttentionSM90Run(at::Tensor float_workspace_buffer,
+                                   at::Tensor int_workspace_buffer, at::Tensor plan_info_vec,
+                                   at::Tensor q_nope, at::Tensor q_pe, at::Tensor ckv_cache,
+                                   at::Tensor kpe_cache, at::Tensor kv_indices, at::Tensor o,
+                                   std::optional<at::Tensor> maybe_lse, int64_t mask_mode_code,
+                                   int64_t num_heads, int64_t page_size, double sm_scale,
+                                   int64_t cuda_stream) {
   // q_nope: [n, num_heads, head_dim_ckv]
   // q_pe: [n, num_heads, head_dim_kpe]
   // ckv_cache: [num_pages, page_size, head_dim_ckv]
@@ -68,8 +69,6 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
         params.q_pe = static_cast<DTypeQ*>(q_pe.data_ptr());
         params.ckv = static_cast<DTypeKV*>(ckv_cache.data_ptr());
         params.kpe = static_cast<DTypeKV*>(kpe_cache.data_ptr());
-        
-        params.bsz_tensor = static_cast<IdType*>(kpe_cache.data_ptr());
 
         params.q_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.q_indptr_offset);
         params.kv_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.kv_indptr_offset);
@@ -117,8 +116,9 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
 
         params.sm_scale = sm_scale;
 
-        cudaError_t status = mla::BatchMLAPagedAttention<MASK_MODE, HEAD_DIM_CKV, HEAD_DIM_KPE>(
-            params, plan_info.num_blks_x, plan_info.num_blks_y, stream);
+        cudaError_t status =
+            mla::BatchMLAPageAttentionHopper<MASK_MODE, HEAD_DIM_CKV, HEAD_DIM_KPE>(
+                params, plan_info.num_blks_x, plan_info.num_blks_y, stream);
 
         TORCH_CHECK(status == cudaSuccess,
                     "Failed to run MLA, error: ", cudaGetErrorString(status));
