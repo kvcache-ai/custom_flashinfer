@@ -1081,12 +1081,12 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   }
   int avg_packed_qo_len = accum_packed_qo_len / batch_size;
 
-  int cluster_size;
-  if (avg_packed_qo_len > 64) {
+  int cluster_size = 1;
+  /*if (avg_packed_qo_len > 64) {
     cluster_size = 2;  // two ctas in a cluster
   } else {
     cluster_size = 1;  // one cta in a cluster
-  }
+  }*/
   uint32_t num_clusters = num_sm / cluster_size;
   plan_info.num_blks_x = cluster_size;
   plan_info.num_blks_y = num_clusters;

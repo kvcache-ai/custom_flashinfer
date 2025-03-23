@@ -27,15 +27,13 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
                                       at::Tensor page_locked_int_workspace_buffer,
                                       at::Tensor qo_indptr, at::Tensor kv_indptr, at::Tensor kv_len,
                                       int64_t num_heads, int64_t head_dim_o, bool causal,
-                                      int64_t cuda_stream) {
+                                      int64_t batch_size, int64_t cuda_stream) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * float_workspace_buffer.element_size();
   size_t int_workspace_size_in_bytes =
       int_workspace_buffer.size(0) * int_workspace_buffer.element_size();
 
   MLAPlanInfo plan_info;
-
-  int batch_size = kv_len.size(0);
 
   cudaStream_t stream = reinterpret_cast<cudaStream_t>(cuda_stream);
   cudaError_t status =

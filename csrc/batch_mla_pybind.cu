@@ -21,7 +21,7 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
                                       at::Tensor page_locked_int_workspace_buffer,
                                       at::Tensor qo_indptr, at::Tensor kv_indptr, at::Tensor kv_len,
                                       int64_t num_heads, int64_t head_dim_o, bool causal,
-                                      int64_t cuda_stream);
+                                      int64_t batch_size, int64_t cuda_stream);
 
 void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
                                at::Tensor plan_info_vec, at::Tensor q_nope, at::Tensor q_pe,
