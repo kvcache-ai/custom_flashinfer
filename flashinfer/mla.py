@@ -255,16 +255,18 @@ class BatchMLAPagedAttentionWrapper:
         self._page_size = page_size
         self._sm_scale = sm_scale
 
-        """
+
         print("before plan")
+        print(self._use_cuda_graph)
         print(self._qo_indptr_buf)
         print(self._kv_indptr_buf)
         print(self._kv_indices_buf)
         print(self._kv_len_arr_buf)
         print(self._bsz_tensor)
-        """
+
         
-        cur_batch_size = bsz_tensor.item()
+        #cur_batch_size = bsz_tensor.item()
+        cur_batch_size = self._kv_len_arr_buf.shape[0]
 
         with self.device as device:
             self._plan_info = self._cached_module.plan(

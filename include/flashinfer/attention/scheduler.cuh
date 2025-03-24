@@ -1060,7 +1060,7 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   int dev_id = 0;
   FLASHINFER_CUDA_CALL(cudaGetDevice(&dev_id));
   FLASHINFER_CUDA_CALL(cudaDeviceGetAttribute(&num_sm, cudaDevAttrMultiProcessorCount, dev_id));
-
+  printf("inner mla batch_size: %d\n",batch_size);
   // step 0. determine the number of blocks in x and y dimensions
   int accum_packed_qo_len = 0;
   std::vector<std::tuple<int, int, int>> idx_qo_kv_len_vec;
@@ -1082,11 +1082,11 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   int avg_packed_qo_len = accum_packed_qo_len / batch_size;
 
   int cluster_size = 1;
-  /*if (avg_packed_qo_len > 64) {
+  if (avg_packed_qo_len > 64) {
     cluster_size = 2;  // two ctas in a cluster
   } else {
     cluster_size = 1;  // one cta in a cluster
-  }*/
+  }
   uint32_t num_clusters = num_sm / cluster_size;
   plan_info.num_blks_x = cluster_size;
   plan_info.num_blks_y = num_clusters;
@@ -1133,6 +1133,7 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
                                  : kv_len;
       int kv_start = 0;
       bool split_kv = remaining_len > kv_len_limit;
+      //bool split_kv = true;
       int row_tile_size = std::min(cluster_tile_q, packed_qo_len - qo_tile_idx * cluster_tile_q);
       if (split_kv) {
         /*
