@@ -328,6 +328,8 @@ def get_batch_prefill_module(backend):
                 paged_kv_indptr: torch.Tensor,
                 paged_kv_indices: torch.Tensor,
                 paged_kv_last_page_len: torch.Tensor,
+                batch_size_tensor: torch.Tensor,
+                num_tokens_tensor: torch.Tensor,
                 o: torch.Tensor,
                 maybe_lse: Optional[torch.Tensor],
                 mask_mode: int,
@@ -354,6 +356,8 @@ def get_batch_prefill_module(backend):
                             paged_kv_indptr,
                             paged_kv_indices,
                             paged_kv_last_page_len,
+                            batch_size_tensor,
+                            num_tokens_tensor,
                             o,
                             maybe_lse,
                             mask_mode,
@@ -380,6 +384,8 @@ def get_batch_prefill_module(backend):
                             paged_kv_indptr,
                             paged_kv_indices,
                             paged_kv_last_page_len,
+                            batch_size_tensor,
+                            num_tokens_tensor,
                             o,
                             maybe_lse,
                             mask_mode,
@@ -528,6 +534,8 @@ def get_batch_prefill_jit_module(module_name: str, jit_module: Any):
         paged_kv_indptr: torch.Tensor,
         paged_kv_indices: torch.Tensor,
         paged_kv_last_page_len: torch.Tensor,
+        batch_size_tensor: torch.Tensor,
+        num_tokens_tensor: torch.Tensor,
         o: torch.Tensor,
         maybe_lse: Optional[torch.Tensor],
         mask_mode: int,
@@ -547,6 +555,8 @@ def get_batch_prefill_jit_module(module_name: str, jit_module: Any):
                 paged_kv_indptr,
                 paged_kv_indices,
                 paged_kv_last_page_len,
+                batch_size_tensor,
+                num_tokens_tensor,
                 o,
                 maybe_lse,
                 mask_mode,
@@ -1005,6 +1015,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
         paged_kv_indptr_buf: Optional[torch.Tensor] = None,
         paged_kv_indices_buf: Optional[torch.Tensor] = None,
         paged_kv_last_page_len_buf: Optional[torch.Tensor] = None,
+        batch_size_tensor_buf: Optional[torch.Tensor] = None,
+        num_tokens_tensor_buf: Optional[torch.Tensor] = None,
         custom_mask_buf: Optional[torch.Tensor] = None,
         mask_indptr_buf: Optional[torch.Tensor] = None,
         backend: str = "auto",
@@ -1047,6 +1059,14 @@ class BatchPrefillWithPagedKVCacheWrapper:
             The user reserved buffer to store the ``paged_kv_last_page_len`` array, the size of
             the buffer should be ``[batch_size]``.
             This argument is only effective when ``use_cuda_graph`` is ``True``.
+
+        batch_size_tensor_buf : Optional[torch.Tensor]
+            The user reserved buffer to store the ``batch size`` array, the size of
+            the buffer should be ``[1]``.
+
+        num_tokens_tensor_buf : Optional[torch.Tensor]
+            The user reserved buffer to store the ``num of tokens in batch``, the size of
+            the buffer should be ``[1]``, dtype should be torch.uint32.
 
         custom_mask_buf : Optional[torch.Tensor]
             The user reserved buffer to store the custom mask tensor, should be large enough to
@@ -1131,6 +1151,11 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 raise ValueError(
                     "The length of paged_kv_last_page_len_buf should be batch_size."
                 )
+            if len(batch_size_tensor_buf) != 1:
+                raise ValueError(
+                    "The length of batch_size_tensor_buf should be 1."
+                )
+
             # NOTE(Zihao): do not check custom_mask_buf and mask_indptr_buf here, as they are optional
         else:
             self._fixed_batch_size = 0
@@ -1139,6 +1164,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
         self._paged_kv_indptr_buf = paged_kv_indptr_buf
         self._paged_kv_indices_buf = paged_kv_indices_buf
         self._paged_kv_last_page_len_buf = paged_kv_last_page_len_buf
+        self._batch_size_tensor_buf = batch_size_tensor_buf
+        self._num_tokens_tensor_buf = num_tokens_tensor_buf
         self._custom_mask_buf = custom_mask_buf
         self._mask_indptr_buf = mask_indptr_buf
         self._max_total_num_rows = None
@@ -1178,6 +1205,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
         paged_kv_indptr: torch.Tensor,
         paged_kv_indices: torch.Tensor,
         paged_kv_last_page_len: torch.Tensor,
+        batch_size_tensor: torch.Tensor,
+        num_tokens_tensor: torch.Tensor,
         num_qo_heads: int,
         num_kv_heads: int,
         head_dim_qk: int,
@@ -1210,6 +1239,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
         paged_kv_last_page_len : torch.Tensor
             The number of entries in the last page of each request in the paged
             kv-cache, shape: ``[batch_size]``.
+        batch_size_tensor : torch.Tensor
+            batch size tensor, shape: ``[1]``.
         num_qo_heads : int
             The number of query/output heads.
         num_kv_heads : int
@@ -1356,6 +1387,14 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 paged_kv_last_page_len, non_blocking=non_blocking
             )
 
+            self._batch_size_tensor_buf.copy_(
+                batch_size_tensor, non_blocking=True
+            )
+
+            self._num_tokens_tensor_buf.copy_(
+                num_tokens_tensor, non_blocking=True
+            )
+
             if packed_custom_mask is not None:
                 if not torch.is_tensor(self._custom_mask_buf):
                     raise ValueError(
@@ -1381,6 +1420,13 @@ class BatchPrefillWithPagedKVCacheWrapper:
             self._paged_kv_last_page_len_buf = paged_kv_last_page_len.to(
                 self.device, non_blocking=non_blocking
             )
+            self._batch_size_tensor_buf = batch_size_tensor.to(
+                self.device, non_blocking=non_blocking
+            )
+            self._num_tokens_tensor_buf = num_tokens_tensor.to(
+                self.device, non_blocking=non_blocking
+            )
+
             if packed_custom_mask is not None:
                 self._custom_mask_buf = packed_custom_mask.to(
                     self.device, non_blocking=non_blocking
@@ -1656,6 +1702,8 @@ class BatchPrefillWithPagedKVCacheWrapper:
             sparse_indptr,
             sparse_indices,
             self._paged_kv_last_page_len_buf,
+            self._batch_size_tensor_buf,
+            self._num_tokens_tensor_buf,
             out,
             lse,
             mask_mode,

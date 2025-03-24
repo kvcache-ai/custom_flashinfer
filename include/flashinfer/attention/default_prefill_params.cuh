@@ -301,8 +301,10 @@ struct BatchPrefillPagedParams {
   IdType* o_indptr;
   bool* block_valid_mask;
   IdType* kv_chunk_size_ptr;
+  IdType* batch_size_ptr;
   uint32_t max_total_num_rows;
   uint32_t* total_num_rows;
+  uint32_t* total_num_rows_ptr;
   uint32_t padded_batch_size;
   bool partition_kv;
 
@@ -332,8 +334,10 @@ struct BatchPrefillPagedParams {
         o_indptr(nullptr),
         block_valid_mask(nullptr),
         kv_chunk_size_ptr(nullptr),
+        batch_size_ptr(nullptr),
         max_total_num_rows(0),
         total_num_rows(nullptr),
+        total_num_rows_ptr(nullptr),
         padded_batch_size(0),
         partition_kv(false) {}
 
@@ -343,7 +347,7 @@ struct BatchPrefillPagedParams {
                                    DTypeO* o, float* lse, float* maybe_alibi_slopes,
                                    uint32_t num_qo_heads, IdType q_stride_n, IdType q_stride_h,
                                    int32_t window_left, float logits_soft_cap, float sm_scale,
-                                   float rope_scale, float rope_theta)
+                                   float rope_scale, float rope_theta, IdType* batch_size_ptr)
       : q(q),
         paged_kv(paged_kv),
         maybe_custom_mask(maybe_custom_mask),
@@ -369,8 +373,10 @@ struct BatchPrefillPagedParams {
         o_indptr(nullptr),
         block_valid_mask(nullptr),
         kv_chunk_size_ptr(nullptr),
+        batch_size_ptr(batch_size_ptr),
         max_total_num_rows(0),
         total_num_rows(nullptr),
+        total_num_rows_ptr(nullptr),
         padded_batch_size(0),
         partition_kv(false) {}
 

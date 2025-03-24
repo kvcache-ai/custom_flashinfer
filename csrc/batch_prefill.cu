@@ -197,7 +197,7 @@ void BatchPrefillWithPagedKVCacheRun(
     at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
     at::Tensor plan_info_vec, at::Tensor q, at::Tensor paged_k_cache,
     at::Tensor paged_v_cache, at::Tensor qo_indptr, at::Tensor paged_kv_indptr,
-    at::Tensor paged_kv_indices, at::Tensor paged_kv_last_page_len, at::Tensor o,
+    at::Tensor paged_kv_indices, at::Tensor paged_kv_last_page_len, at::Tensor batch_size_tensor, at::Tensor num_tokens_tensor, at::Tensor o,
     std::optional<at::Tensor> maybe_lse, int64_t mask_mode_code, int64_t layout,
     int64_t window_left ADDITIONAL_FUNC_PARAMS, int64_t cuda_stream) {
   PrefillPlanInfo plan_info;
@@ -273,6 +273,7 @@ void BatchPrefillWithPagedKVCacheRun(
         params.merge_indptr = nullptr;
         params.o_indptr = nullptr;
         params.kv_chunk_size_ptr = nullptr;
+
         params.block_valid_mask = nullptr;
         params.total_num_rows = nullptr;
         params.max_total_num_rows = 0;
@@ -309,6 +310,9 @@ void BatchPrefillWithPagedKVCacheRun(
           params.total_num_rows =
               GetPtrFromBaseOffset<uint32_t>(int_buffer_ptr, plan_info.total_num_rows_offset);
         }
+
+        params.total_num_rows_ptr = static_cast<uint32_t*>(num_tokens_tensor.data_ptr());
+        params.batch_size_ptr = static_cast<IdType*>(batch_size_tensor.data_ptr());
 
         cudaError_t status = cudaSuccess;
 

@@ -109,6 +109,9 @@ struct PagedParams {
   uint32_t padded_batch_size;
   bool partition_kv;
 
+  uint32_t* total_num_rows_ptr;
+  IdType* batch_size_ptr;
+
   __host__ __device__ __forceinline__ uint32_t get_qo_len(uint32_t batch_idx) const {
     return q_indptr[batch_idx + 1] - q_indptr[batch_idx];
   }

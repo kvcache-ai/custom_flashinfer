@@ -647,7 +647,7 @@ cudaError_t AttentionSum(DTypeIn* v, DTypeO* v_sum, uint32_t num_index_sets, uin
 
 template <typename DTypeIn, typename DTypeO, typename IdType>
 cudaError_t VariableLengthMergeStates(DTypeIn* v, float* s, IdType* indptr, DTypeO* v_merged,
-                                      float* s_merged, uint32_t max_seq_len, uint32_t* seq_len,
+                                      float* s_merged, uint32_t max_seq_len, uint32_t* seq_len, 
                                       uint32_t num_heads, uint32_t head_dim,
                                       cudaStream_t stream = nullptr) {
   int dev_id = 0;

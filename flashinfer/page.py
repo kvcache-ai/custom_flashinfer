@@ -103,6 +103,7 @@ def _append_paged_kv_cache_kernel(
     kv_indices: torch.Tensor,
     kv_indptr: torch.Tensor,
     kv_last_page_len: torch.Tensor,
+     nnz_tensor: torch.Tensor,
     layout: int,
 ) -> None:
     with append_key.device as device:
@@ -121,6 +122,7 @@ def _append_paged_kv_cache_kernel(
             kv_indices,
             kv_indptr,
             kv_last_page_len,
+            nnz_tensor,
             layout,
             get_cuda_stream(device),
         )
@@ -148,9 +150,14 @@ def get_batch_indices_positions_kernel(
     seq_lens_ptr,
     batch_indices_ptr,
     positions_ptr,
+    batch_size_ptr,
     num_stages: tl.constexpr,
 ):
     batch_idx = tl.program_id(0)
+
+    batch_size = tl.load(batch_size_ptr)
+    if batch_idx >= batch_size:
+        return 
 
     batch_start = tl.load(append_indptr + batch_idx)
     batch_end = tl.load(append_indptr + batch_idx + 1)
@@ -164,7 +171,7 @@ def get_batch_indices_positions_kernel(
 
 
 def get_batch_indices_positions(
-    append_indptr: torch.Tensor, seq_lens: torch.Tensor, nnz: int
+    append_indptr: torch.Tensor, seq_lens: torch.Tensor, batsh_size_tensor: torch.Tensor, nnz: int
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     r"""Convert append indptr and sequence lengths to batch indices and positions.
 
@@ -174,6 +181,8 @@ def get_batch_indices_positions(
         The indptr of the ragged tensor, shape: ``[batch_size + 1]``.
     seq_lens: torch.Tensor
         The sequence lengths of each request in the KV-Cache, shape: ``[batch_size]``.
+    batsh_size_tensor : torch.Tensor
+        A ``[1]`` tensor containing batch_size.        
     nnz : int
         The number of entries in the ragged tensor.
 
@@ -211,7 +220,7 @@ def get_batch_indices_positions(
     batch_indices = torch.empty((nnz,), device=append_indptr.device, dtype=torch.int32)
     positions = torch.empty((nnz,), device=append_indptr.device, dtype=torch.int32)
     get_batch_indices_positions_kernel[(batch_size,)](
-        append_indptr, seq_lens, batch_indices, positions, num_stages=2
+        append_indptr, seq_lens, batch_indices, positions, batsh_size_tensor, num_stages=2
     )
     return batch_indices, positions
 
@@ -251,6 +260,7 @@ def append_paged_kv_cache(
     kv_indices: torch.Tensor,
     kv_indptr: torch.Tensor,
     kv_last_page_len: torch.Tensor,
+    num_tokens_tensor: torch.Tensor,
     kv_layout: str = "NHD",
 ) -> None:
     r"""Append a batch of key-value pairs to a paged key-value cache.
@@ -288,6 +298,8 @@ def append_paged_kv_cache(
     kv_last_page_len : torch.Tensor
         The number of entries in the last page of each request in the paged kv cache,
         shape: ``[batch_size]``.
+    num_tokens_tensor : torch.Tensor
+        A ``[1]`` tensor containing a number equals to tokens in current batch.
     kv_layout : str
         The layout of the paged kv-cache, either ``NHD`` or ``HND``.
 
@@ -367,5 +379,6 @@ def append_paged_kv_cache(
         kv_indices,
         kv_indptr,
         kv_last_page_len,
+        num_tokens_tensor,
         TensorLayout[kv_layout].value,
     )

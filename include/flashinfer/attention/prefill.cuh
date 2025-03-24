@@ -2008,7 +2008,8 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchPrefillWithPagedKVC
              v_smem_offset_w = v_smem.template get_permuted_offset<UPCAST_STRIDE_V>(
                  warp_idx * KV_THR_LAYOUT_ROW + lane_idx / KV_THR_LAYOUT_COL,
                  lane_idx % KV_THR_LAYOUT_COL);
-    const IdType last_indptr = paged_kv.indptr[paged_kv.batch_size];
+    const IdType page_kv_batch_size = *params.batch_size_ptr;
+    const IdType last_indptr = paged_kv.indptr[page_kv_batch_size];
 
     uint32_t packed_page_iter_base =
         paged_kv.indptr[request_idx] * paged_kv.page_size + chunk_start;
@@ -2351,7 +2352,7 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Param
         if constexpr (AttentionVariant::use_softmax) {
           FLASHINFER_CUDA_CALL(VariableLengthMergeStates(
               tmp_v, tmp_s, params.merge_indptr, o, lse, params.max_total_num_rows,
-              params.total_num_rows, num_qo_heads, HEAD_DIM_VO, stream));
+              params.total_num_rows_ptr, num_qo_heads, HEAD_DIM_VO, stream));
         } else {
           FLASHINFER_CUDA_CALL(
               VariableLengthAttentionSum(tmp_v, params.merge_indptr, o, params.max_total_num_rows,

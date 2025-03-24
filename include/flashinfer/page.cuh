@@ -259,7 +259,7 @@ __global__ void AppendPagedKVCacheKernel(paged_kv_t<DType, IdType> paged_kv,
                                          DType* __restrict__ append_key,
                                          DType* __restrict__ append_value,
                                          IdType* __restrict__ batch_indices,
-                                         IdType* __restrict__ positions, uint32_t nnz,
+                                         IdType* __restrict__ positions, uint32_t* nnz_ptr,
                                          size_t append_k_stride_n, size_t append_k_stride_h,
                                          size_t append_v_stride_n, size_t append_v_stride_h) {
   uint32_t tx = threadIdx.x, ty = threadIdx.y;
@@ -267,6 +267,7 @@ __global__ void AppendPagedKVCacheKernel(paged_kv_t<DType, IdType> paged_kv,
   uint32_t head_idx = ty;
   uint32_t cta_id = blockIdx.x;
   uint32_t num_ctas = gridDim.x;
+  uint32_t nnz = *nnz_ptr;
 
 #pragma unroll 4
   for (uint32_t i = cta_id; i < nnz; i += num_ctas) {
@@ -376,7 +377,7 @@ cudaError_t AppendPagedKVCacheDecode(paged_kv_t<DType, IdType> paged_kv, DType* 
 template <typename DType, typename IdType>
 cudaError_t AppendPagedKVCache(paged_kv_t<DType, IdType> paged_kv, DType* append_key,
                                DType* append_value, IdType* batch_indices, IdType* positions,
-                               uint32_t nnz, size_t append_k_stride_n, size_t append_k_stride_h,
+                               uint32_t nnz, uint32_t* nnz_ptr, size_t append_k_stride_n, size_t append_k_stride_h,
                                size_t append_v_stride_n, size_t append_v_stride_h,
                                cudaStream_t stream = nullptr) {
   uint32_t head_dim = paged_kv.head_dim;
@@ -401,7 +402,7 @@ cudaError_t AppendPagedKVCache(paged_kv_t<DType, IdType> paged_kv, DType* append
     dim3 nthrs(bdx, bdy);
 
     void* args[] = {(void*)&paged_kv,          (void*)&append_key,        (void*)&append_value,
-                    (void*)&batch_indices,     (void*)&positions,         (void*)&nnz,
+                    (void*)&batch_indices,     (void*)&positions,         (void*)&nnz_ptr,
                     (void*)&append_k_stride_n, (void*)&append_k_stride_h, (void*)&append_v_stride_n,
                     (void*)&append_v_stride_h};
     FLASHINFER_CUDA_CALL(cudaLaunchKernel((void*)kernel, nblks, nthrs, args, 0, stream));

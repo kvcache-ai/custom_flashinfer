@@ -22,6 +22,7 @@ using namespace flashinfer;
 void append_paged_kv_cache(at::Tensor append_key, at::Tensor append_value, at::Tensor batch_indices,
                            at::Tensor positions, at::Tensor paged_k_cache, at::Tensor paged_v_cache,
                            at::Tensor kv_indices, at::Tensor kv_indptr, at::Tensor kv_last_page_len,
+                           at::Tensor nnz_tensor,
                            int64_t layout, int64_t cuda_stream) {
   CHECK_LAST_DIM_CONTIGUOUS(append_key);
   CHECK_LAST_DIM_CONTIGUOUS(append_value);
@@ -101,7 +102,9 @@ void append_paged_kv_cache(at::Tensor append_key, at::Tensor append_value, at::T
         AppendPagedKVCache(paged_kv, static_cast<c_type*>(append_key.data_ptr()),
                            static_cast<c_type*>(append_value.data_ptr()),
                            static_cast<int32_t*>(batch_indices.data_ptr()),
-                           static_cast<int32_t*>(positions.data_ptr()), nnz, append_k_stride_n,
+                           static_cast<int32_t*>(positions.data_ptr()), nnz, 
+                           static_cast<int32_t*>(nnz_tensor.data_ptr()),
+                           append_k_stride_n,
                            append_k_stride_h, append_v_stride_n, append_v_stride_h, stream);
     TORCH_CHECK(status == cudaSuccess,
                 "AppendPagedKVCache failed with error: ", cudaGetErrorString(status));
