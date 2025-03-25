@@ -265,6 +265,8 @@ class BatchMLAPagedAttentionWrapper:
         """
         
         cur_batch_size = bsz_tensor.item()
+        cur_batch_size = kv_len_arr_host.shape[0]
+        print(self._use_cuda_graph)
 
         with self.device as device:
             self._plan_info = self._cached_module.plan(
@@ -275,10 +277,10 @@ class BatchMLAPagedAttentionWrapper:
                 kv_indptr_host,
                 kv_len_arr_host,
                 num_heads,
-                2 if self._use_cuda_graph else 0,
                 head_dim_ckv,  # head_dim_o
                 causal,
                 cur_batch_size,
+                2 if self._use_cuda_graph else 0,
                 get_cuda_stream(device),
             )
 

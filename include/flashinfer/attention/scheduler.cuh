@@ -1091,6 +1091,7 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
           cluster_size = 1;  // one cta in a cluster
       }
   }
+  //printf("cluster_size %d\n", cluster_size);
   
   uint32_t num_clusters = num_sm / cluster_size;
   plan_info.num_blks_x = cluster_size;
