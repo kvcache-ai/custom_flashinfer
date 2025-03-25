@@ -821,7 +821,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
   const uint32_t bsz_num = params.bsz_tensor[0];
 
 #pragma unroll 1
-  for (IdType work_idx = work_indptr[blockIdx.y]; work_idx < work_indptr[blockIdx.y + 1] && work_idx < bsz_num;
+  for (IdType work_idx = work_indptr[blockIdx.y]; work_idx < work_indptr[blockIdx.y + 1];
        ++work_idx) {
     const uint32_t q_indptr = params.q_indptr[work_idx];
     const uint32_t kv_indptr = params.kv_indptr[work_idx];
