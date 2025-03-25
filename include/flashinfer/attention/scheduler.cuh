@@ -1054,7 +1054,7 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
                            void* int_buffer, void* page_locked_int_buffer,
                            size_t int_workspace_size_in_bytes, MLAPlanInfo& plan_info,
                            IdType* qo_indptr_h, IdType* kv_indptr_h, IdType* kv_len_arr_h,
-                           uint32_t batch_size, uint32_t num_heads, uint32_t head_dim_o,
+                           uint32_t batch_size, uint32_t cuda_graph_cluster_size, uint32_t num_heads, uint32_t head_dim_o,
                            bool causal, cudaStream_t stream) {
   int num_sm = 0;
   int dev_id = 0;
@@ -1081,12 +1081,17 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   }
   int avg_packed_qo_len = accum_packed_qo_len / batch_size;
 
-  int cluster_size = 1;
-  /*if (avg_packed_qo_len > 64) {
-    cluster_size = 2;  // two ctas in a cluster
-  } else {
-    cluster_size = 1;  // one cta in a cluster
-  }*/
+  int cluster_size = cuda_graph_cluster_size;
+  if (cluster_size == 0)
+  {
+      if (avg_packed_qo_len > 64) {
+          cluster_size = 2;  // two ctas in a cluster
+      }
+      else {
+          cluster_size = 1;  // one cta in a cluster
+      }
+  }
+  
   uint32_t num_clusters = num_sm / cluster_size;
   plan_info.num_blks_x = cluster_size;
   plan_info.num_blks_y = num_clusters;

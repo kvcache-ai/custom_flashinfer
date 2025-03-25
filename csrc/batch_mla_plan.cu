@@ -27,7 +27,7 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
                                       at::Tensor page_locked_int_workspace_buffer,
                                       at::Tensor qo_indptr, at::Tensor kv_indptr, at::Tensor kv_len,
                                       int64_t num_heads, int64_t head_dim_o, bool causal,
-                                      int64_t batch_size, int64_t cuda_stream) {
+                                      int64_t batch_size, int64_t cuda_graph_cluster_size, int64_t cuda_stream) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * float_workspace_buffer.element_size();
   size_t int_workspace_size_in_bytes =
@@ -41,7 +41,7 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
               int_workspace_buffer.data_ptr(), page_locked_int_workspace_buffer.data_ptr(),
               int_workspace_size_in_bytes, plan_info, static_cast<IdType*>(qo_indptr.data_ptr()),
               static_cast<IdType*>(kv_indptr.data_ptr()), static_cast<IdType*>(kv_len.data_ptr()),
-              batch_size, num_heads, head_dim_o, causal, stream);
+              batch_size, cuda_graph_cluster_size, num_heads, head_dim_o, causal, stream);
 
   TORCH_CHECK(status == cudaSuccess, "Failed to plan MLA, error: ", cudaGetErrorString(status));
 
