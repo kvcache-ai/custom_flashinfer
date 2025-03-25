@@ -69,7 +69,8 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
         params.ckv = static_cast<DTypeKV*>(ckv_cache.data_ptr());
         params.kpe = static_cast<DTypeKV*>(kpe_cache.data_ptr());
         
-        params.bsz_tensor = static_cast<IdType*>(kpe_cache.data_ptr());
+        //TODO: not used. remove it.
+        params.bsz_tensor = static_cast<IdType*>(bsz_tensor.data_ptr());
 
         params.q_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.q_indptr_offset);
         params.kv_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.kv_indptr_offset);
