@@ -18,14 +18,10 @@
 
 #include "pytorch_extension_utils.h"
 
-#include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <torch/extension.h>
-
 using namespace flashinfer;
 
-void rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight, double eps,
-             at::Tensor& batch_size_tensor,bool enable_pdl) {
+void rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight,
+             at::Tensor& batch_size_tensor, double eps, bool enable_pdl) {
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(input);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(weight);
   auto device = input.device();
@@ -52,8 +48,8 @@ void rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight, double e
   });
 }
 
-void fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight, double eps,
-                       at::Tensor& batch_size_tensor, bool enable_pdl) {
+void fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight,
+                       at::Tensor& batch_size_tensor, double eps, bool enable_pdl) {
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(input);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(residual);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(weight);
@@ -83,8 +79,8 @@ void fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weig
   });
 }
 
-void gemma_rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight, double eps,
-                   bool enable_pdl) {
+void gemma_rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight,
+                   at::Tensor& batch_size_tensor, double eps, bool enable_pdl) {
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(input);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(weight);
   auto device = input.device();
@@ -102,8 +98,9 @@ void gemma_rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight, do
   DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FP16(input.scalar_type(), c_type, [&] {
     cudaError_t status = norm::GemmaRMSNorm(
         static_cast<c_type*>(input.data_ptr()), static_cast<c_type*>(weight.data_ptr()),
-        static_cast<c_type*>(output.data_ptr()), batch_size, hidden_size, input.stride(0),
-        output.stride(0), eps, enable_pdl, stream);
+        static_cast<c_type*>(output.data_ptr()), batch_size,
+        static_cast<uint32_t*>(batch_size_tensor.data_ptr()),
+        hidden_size, input.stride(0), output.stride(0), eps, enable_pdl, stream);
     TORCH_CHECK(status == cudaSuccess,
                 "GemmaRMSNorm failed with error code " + std::string(cudaGetErrorString(status)));
     return true;
@@ -111,7 +108,7 @@ void gemma_rmsnorm(at::Tensor& output, at::Tensor& input, at::Tensor& weight, do
 }
 
 void gemma_fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight,
-                             double eps, bool enable_pdl) {
+                             at::Tensor& batch_size_tensor, double eps, bool enable_pdl) {
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(input);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(residual);
   CHECK_LAST_DIM_CONTIGUOUS_INPUT(weight);
@@ -132,8 +129,9 @@ void gemma_fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor
   DISPATCH_PYTORCH_DTYPE_TO_CTYPE_FP16(input.scalar_type(), c_type, [&] {
     cudaError_t status = norm::GemmaFusedAddRMSNorm(
         static_cast<c_type*>(input.data_ptr()), static_cast<c_type*>(residual.data_ptr()),
-        static_cast<c_type*>(weight.data_ptr()), batch_size, hidden_size, input.stride(0),
-        residual.stride(0), eps, enable_pdl, stream);
+        static_cast<c_type*>(weight.data_ptr()), batch_size,
+        static_cast<uint32_t*>(batch_size_tensor.data_ptr()),
+        hidden_size, input.stride(0), residual.stride(0), eps, enable_pdl, stream);
     TORCH_CHECK(status == cudaSuccess, "GemmaFusedAddRMSNorm failed with error code " +
                                            std::string(cudaGetErrorString(status)));
     return true;

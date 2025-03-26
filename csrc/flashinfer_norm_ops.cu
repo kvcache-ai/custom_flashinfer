@@ -19,13 +19,13 @@ void rmsnorm(at::Tensor& out, at::Tensor& input, at::Tensor& weight,
              at::Tensor& batch_size_tensor, double eps, bool enable_pdl);
 
 void fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight,
-                       at::Tensor& batch_size_tensor, bool enable_pdl, bool enable_pdl);
+                       at::Tensor& batch_size_tensor, double eps, bool enable_pdl);
 
-void gemma_rmsnorm(at::Tensor& out, at::Tensor& input, at::Tensor& weight, double eps,
-                   bool enable_pdl);
+void gemma_rmsnorm(at::Tensor& out, at::Tensor& input, at::Tensor& weight,
+                   at::Tensor& batch_size_tensor, double eps, bool enable_pdl);
 
 void gemma_fused_add_rmsnorm(at::Tensor& input, at::Tensor& residual, at::Tensor& weight,
-                             double eps, bool enable_pdl);
+                             at::Tensor& batch_size_tensor, double eps, bool enable_pdl);
 
 TORCH_LIBRARY_FRAGMENT(TORCH_EXTENSION_NAME, m) {
   // Root mean square normalization
