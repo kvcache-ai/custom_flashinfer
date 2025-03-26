@@ -25,7 +25,6 @@ from .utils import (
     MaskMode,
     _check_shape_dtype_device,
     determine_mla_backend,
-    get_cuda_stream,
     register_custom_op,
     register_fake_op,
 )
@@ -165,7 +164,7 @@ class BatchMLAPagedAttentionWrapper:
             self._int_workspace_buffer.shape,
             dtype=self._int_workspace_buffer.dtype,
             pin_memory=True,
-            device="cpu"
+            device="cpu",
         )
         self._use_cuda_graph = use_cuda_graph
         self._qo_indptr_buf = qo_indptr
@@ -193,6 +192,7 @@ class BatchMLAPagedAttentionWrapper:
         q_data_type: torch.dtype,
         kv_data_type: torch.dtype,
         bsz_tensor: torch.Tensor,
+        use_profiler: bool = False,
     ) -> None:
         r"""Plan the MLA attention computation.
 
@@ -226,6 +226,8 @@ class BatchMLAPagedAttentionWrapper:
             The data type of the kv-cache tensor.
         bsz_tensor: torch.Tensor shape [1]
             The num of batch size in minibatch
+        use_profiler : bool, optional
+            Whether to enable intra-kernel profiler, default is False.
         """
         self._cached_module = get_batch_mla_module(self._backend)(
             q_data_type,
@@ -234,6 +236,7 @@ class BatchMLAPagedAttentionWrapper:
             qo_indptr.dtype,
             head_dim_ckv,
             head_dim_kpe,
+            use_profiler,
         )
         qo_indptr_host = qo_indptr.to("cpu")
         kv_indptr_host = kv_indptr.to("cpu")
@@ -254,6 +257,7 @@ class BatchMLAPagedAttentionWrapper:
         self._causal = causal
         self._page_size = page_size
         self._sm_scale = sm_scale
+        self._use_profiler = use_profiler
 
         """
         print("before plan")
@@ -268,21 +272,19 @@ class BatchMLAPagedAttentionWrapper:
         cur_batch_size = kv_len_arr_host.shape[0]
         print(self._use_cuda_graph)
 
-        with self.device as device:
-            self._plan_info = self._cached_module.plan(
-                self._float_workspace_buffer,
-                self._int_workspace_buffer,
-                self._pin_memory_int_workspace_buffer,
-                qo_indptr_host,
-                kv_indptr_host,
-                kv_len_arr_host,
-                num_heads,
-                head_dim_ckv,  # head_dim_o
-                causal,
-                cur_batch_size,
-                2 if self._use_cuda_graph else 0,
-                get_cuda_stream(device),
-            )
+        self._plan_info = self._cached_module.plan.default(
+            self._float_workspace_buffer,
+            self._int_workspace_buffer,
+            self._pin_memory_int_workspace_buffer,
+            qo_indptr_host,
+            kv_indptr_host,
+            kv_len_arr_host,
+            num_heads,
+            head_dim_ckv,  # head_dim_o
+            causal,
+            cur_batch_size,
+            2 if self._use_cuda_graph else 0,
+        )
 
     @overload
     def run(
@@ -313,6 +315,7 @@ class BatchMLAPagedAttentionWrapper:
         out: Optional[torch.Tensor] = None,
         lse: Optional[torch.Tensor] = None,
         return_lse: bool = False,
+        profiler_buffer: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         r"""Run the MLA attention computation.
 
@@ -334,46 +337,52 @@ class BatchMLAPagedAttentionWrapper:
             The log-sum-exp of attention logits, if not provided, will be allocated internally.
         return_lse : bool, optional
             Whether to return the log-sum-exp value, default is False.
+        profiler_buffer : Optional[torch.Tensor]
+            The buffer to store the profiler data.
         """
+        if profiler_buffer is None:
+            if self._use_profiler:
+                raise ValueError(
+                    "Profiler is enabled, profiler_buffer must be provided"
+                )
         num_heads = q_nope.shape[1]
         page_size = self._page_size
         sm_scale = self._sm_scale
         causal = self._causal
         mask_mode = MaskMode.CAUSAL.value if causal else MaskMode.NON_CAUSAL.value
-        with self.device as device:
-            if out is None:
-                out = torch.empty_like(q_nope)
+        device = self.device
+        if out is None:
+            out = torch.empty_like(q_nope)
+        else:
+            _check_shape_dtype_device(
+                out, q_nope.shape, q_nope.dtype, q_nope.device, "out"
+            )
+
+        if return_lse:
+            if lse is None:
+                lse = torch.empty(q_nope.shape[:2], dtype=torch.float32, device=device)
             else:
                 _check_shape_dtype_device(
-                    out, q_nope.shape, q_nope.dtype, q_nope.device, "out"
+                    lse, q_nope.shape[:2], torch.float32, q_nope.device, "lse"
                 )
-
-            if return_lse:
-                if lse is None:
-                    lse = torch.empty(
-                        q_nope.shape[:2], dtype=torch.float32, device=device
-                    )
-                else:
-                    _check_shape_dtype_device(
-                        lse, q_nope.shape[:2], torch.float32, q_nope.device, "lse"
-                    )
-            self._cached_module.run(
-                self._float_workspace_buffer,
-                self._int_workspace_buffer,
-                self._plan_info,
-                q_nope,
-                q_pe,
-                ckv_cache,
-                kpe_cache,
-                self._kv_indices_buf,
-                out,
-                lse,
-                mask_mode,
-                num_heads,
-                page_size,
-                sm_scale,
-                get_cuda_stream(device),
-                self._bsz_tensor,
-            )
+        profiler_args = (profiler_buffer,) if self._use_profiler else ()
+        self._cached_module.run.default(
+            self._float_workspace_buffer,
+            self._int_workspace_buffer,
+            self._plan_info,
+            q_nope,
+            q_pe,
+            ckv_cache,
+            kpe_cache,
+            self._kv_indices_buf,
+            out,
+            lse,
+            mask_mode,
+            num_heads,
+            page_size,
+            sm_scale,
+            self._bsz_tensor,
+            *profiler_args,  
+        )
 
         return (out, lse) if return_lse else out

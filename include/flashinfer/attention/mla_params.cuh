@@ -18,6 +18,7 @@
 #include <cuda.h>
 
 #include "../fastdiv.cuh"
+#include "../profiler.cuh"
 
 namespace flashinfer {
 
@@ -32,7 +33,7 @@ struct MLAParams {
   DTypeQ* q_pe;
   DTypeKV* ckv;
   DTypeKV* kpe;
-  float* partial_o;
+  DTypeO* partial_o;
   float* partial_lse;
   DTypeO* final_o;
   float* final_lse;
@@ -53,6 +54,9 @@ struct MLAParams {
   IdType* kv_start;
   IdType* kv_end;
   IdType* work_indptr;
+
+  PROFILER_PARAMS_DECL
+
   uint_fastdiv block_size;
   uint_fastdiv num_heads;
 

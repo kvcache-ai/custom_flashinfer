@@ -169,6 +169,10 @@ if enable_aot:
         if arch < 75:
             raise RuntimeError("FlashInfer requires sm75+")
 
+    if os.environ.get("FLASHINFER_USE_CXX11_ABI"):
+        # force use cxx11 abi
+        torch._C._GLIBCXX_USE_CXX11_ABI = 1
+
     cuda_version = get_cuda_version()
     torch_full_version = Version(torch.__version__)
     torch_version = f"{torch_full_version.major}.{torch_full_version.minor}"
@@ -243,6 +247,7 @@ if enable_aot:
         "csrc/batch_prefill.cu",
         "csrc/single_decode.cu",
         "csrc/single_prefill.cu",
+        # "csrc/pod.cu",  # Temporarily disabled
         "csrc/flashinfer_ops.cu",
     ]
     kernel_sm90_sources = [

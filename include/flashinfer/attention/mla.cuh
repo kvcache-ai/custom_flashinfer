@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <sstream>
 
+#include "../profiler.cuh"
 #include "mla_params.cuh"
 #include "prefill.cuh"
 #include "variant_helper.cuh"
@@ -30,6 +31,8 @@ namespace mla {
 
 struct StandardAttention : AttentionVariantBase {
   float sm_scale_log2;
+
+  PROFILER_CLOSURE_PARAMS_DECL
 
   template <typename Params>
   __device__ __host__ StandardAttention(const Params& params, uint32_t batch_idx,
@@ -178,8 +181,8 @@ __device__ __forceinline__ void load_kv(
     typename KTraits::SharedStorage* smem_storage, typename KTraits::DTypeKV* ckv,
     typename KTraits::DTypeKV* kpe, typename KTraits::IdType* indices, const uint32_t ckv_stride_n,
     const uint32_t ckv_stride_page, const uint32_t kpe_stride_n, const uint32_t kpe_stride_page,
-    const uint32_t kv_bound, const uint32_t packed_block_iter_base, const uint_fastdiv& block_size,
-    const uint32_t stage_idx) {
+    const uint32_t packed_kv_bound, const uint32_t packed_block_iter_base,
+    const uint_fastdiv& block_size, const uint32_t stage_idx) {
   using DTypeKV = typename KTraits::DTypeKV;
   constexpr uint32_t UPCAST_STRIDE_CKV = KTraits::UPCAST_STRIDE_CKV;
   constexpr uint32_t UPCAST_STRIDE_KPE = KTraits::UPCAST_STRIDE_KPE;
@@ -195,12 +198,14 @@ __device__ __forceinline__ void load_kv(
   if constexpr (KTraits::NUM_MMA_KV == 1) {
     if (warpgroup_idx == 0) {
       uint32_t q, r;
+      uint32_t packed_block_iter = packed_block_iter_base + lane_idx / 8 + warp_idx_in_wg * 4;
+      block_size.divmod(packed_block_iter, q, r);
 
-      block_size.divmod(packed_block_iter_base + lane_idx / 8 + warp_idx_in_wg * 4, q, r);
-
-      DTypeKV* ckv_ptr = ckv + (q < kv_bound ? indices[q] : 0) * ckv_stride_page +
+      DTypeKV* ckv_ptr = ckv +
+                         (packed_block_iter < packed_kv_bound ? indices[q] : 0) * ckv_stride_page +
                          r * ckv_stride_n + (lane_idx % 8) * upcast_size<DTypeKV>();
-      DTypeKV* kpe_ptr = kpe + (q < kv_bound ? indices[q] : 0) * kpe_stride_page +
+      DTypeKV* kpe_ptr = kpe +
+                         (packed_block_iter < packed_kv_bound ? indices[q] : 0) * kpe_stride_page +
                          r * kpe_stride_n + (lane_idx % 8) * upcast_size<DTypeKV>();
 
 #pragma unroll
@@ -208,7 +213,7 @@ __device__ __forceinline__ void load_kv(
         uint32_t ckv_smem_offset_w = ckv_smem.template get_permuted_offset<UPCAST_STRIDE_CKV>(
             warp_idx_in_wg * 4 + lane_idx / 8, 8 * mma_d + lane_idx % 8);
         ckv_smem.load_128b_async<SharedMemFillMode::kFillZero>(ckv_smem_offset_w, ckv_ptr,
-                                                               q < kv_bound);
+                                                               packed_block_iter < packed_kv_bound);
         ckv_ptr += 8 * upcast_size<DTypeKV>();
       }
 
@@ -217,7 +222,7 @@ __device__ __forceinline__ void load_kv(
         uint32_t kpe_smem_offset_w = kpe_smem.template get_permuted_offset<UPCAST_STRIDE_KPE>(
             warp_idx_in_wg * 4 + lane_idx / 8, 8 * mma_d + lane_idx % 8);
         kpe_smem.load_128b_async<SharedMemFillMode::kFillZero>(kpe_smem_offset_w, kpe_ptr,
-                                                               q < kv_bound);
+                                                               packed_block_iter < packed_kv_bound);
         kpe_ptr += 8 * upcast_size<DTypeKV>();
       }
     }
@@ -225,14 +230,15 @@ __device__ __forceinline__ void load_kv(
 #pragma unroll
     for (uint32_t mma_kv = 0; mma_kv < KTraits::NUM_MMA_KV / 2; ++mma_kv) {
       uint32_t q, r;
+      uint32_t packed_block_iter = packed_block_iter_base + lane_idx / 8 +
+                                   (warpgroup_idx + mma_kv * 2) * 16 + warp_idx_in_wg * 4;
+      block_size.divmod(packed_block_iter, q, r);
 
-      block_size.divmod(packed_block_iter_base + lane_idx / 8 + (warpgroup_idx + mma_kv * 2) * 16 +
-                            warp_idx_in_wg * 4,
-                        q, r);
-
-      DTypeKV* ckv_ptr = ckv + (q < kv_bound ? indices[q] : 0) * ckv_stride_page +
+      DTypeKV* ckv_ptr = ckv +
+                         (packed_block_iter < packed_kv_bound ? indices[q] : 0) * ckv_stride_page +
                          r * ckv_stride_n + (lane_idx % 8) * upcast_size<DTypeKV>();
-      DTypeKV* kpe_ptr = kpe + (q < kv_bound ? indices[q] : 0) * kpe_stride_page +
+      DTypeKV* kpe_ptr = kpe +
+                         (packed_block_iter < packed_kv_bound ? indices[q] : 0) * kpe_stride_page +
                          r * kpe_stride_n + (lane_idx % 8) * upcast_size<DTypeKV>();
 
 #pragma unroll
@@ -241,7 +247,7 @@ __device__ __forceinline__ void load_kv(
             32 * mma_kv + warpgroup_idx * 16 + warp_idx_in_wg * 4 + lane_idx / 8,
             8 * mma_d + lane_idx % 8);
         ckv_smem.load_128b_async<SharedMemFillMode::kFillZero>(ckv_smem_offset_w, ckv_ptr,
-                                                               q < kv_bound);
+                                                               packed_block_iter < packed_kv_bound);
         ckv_ptr += 8 * upcast_size<DTypeKV>();
       }
 
@@ -251,7 +257,7 @@ __device__ __forceinline__ void load_kv(
             32 * mma_kv + warpgroup_idx * 16 + warp_idx_in_wg * 4 + lane_idx / 8,
             8 * mma_d + lane_idx % 8);
         kpe_smem.load_128b_async<SharedMemFillMode::kFillZero>(kpe_smem_offset_w, kpe_ptr,
-                                                               q < kv_bound);
+                                                               packed_block_iter < packed_kv_bound);
         kpe_ptr += 8 * upcast_size<DTypeKV>();
       }
     }
@@ -620,9 +626,9 @@ __device__ void DevicePersistentMergeStates(
     typename KTraits::IdType* merge_packed_offset_end,
     typename KTraits::IdType* merge_partial_packed_offset_start,
     typename KTraits::IdType* merge_partial_packed_offset_end,
-    typename KTraits::IdType* merge_partial_stride, float* partial_o, float* partial_lse,
-    typename KTraits::DTypeO* final_o, float* final_lse, const uint32_t o_stride_n,
-    const uint32_t o_stride_h, const uint_fastdiv& num_heads) {
+    typename KTraits::IdType* merge_partial_stride, typename KTraits::DTypeO* partial_o,
+    float* partial_lse, typename KTraits::DTypeO* final_o, float* final_lse,
+    const uint32_t o_stride_n, const uint32_t o_stride_h, const uint_fastdiv& num_heads) {
   constexpr uint32_t VEC_SIZE = 4;  // partial o has data type float
   constexpr uint32_t NUM_THRS_PER_ROW = KTraits::HEAD_DIM_CKV / VEC_SIZE;
   constexpr uint32_t ROWS_PER_ITERATION = (KTraits::NUM_THREADS) / NUM_THRS_PER_ROW;
@@ -645,8 +651,8 @@ __device__ void DevicePersistentMergeStates(
          partial_packed_offset < partial_offset_end; partial_packed_offset += stride) {
       vec_t<float, VEC_SIZE> o_partial;
       float lse_partial;
-      o_partial.load(partial_o + partial_packed_offset * KTraits::HEAD_DIM_CKV +
-                     (thread_id % NUM_THRS_PER_ROW) * VEC_SIZE);
+      o_partial.cast_load(partial_o + partial_packed_offset * KTraits::HEAD_DIM_CKV +
+                          (thread_id % NUM_THRS_PER_ROW) * VEC_SIZE);
       lse_partial = partial_lse[partial_packed_offset];
       st.merge(o_partial, lse_partial, 1);
     }
@@ -662,10 +668,11 @@ __device__ void DevicePersistentMergeStates(
 template <typename KTraits>
 __device__ __forceinline__ void write_o(typename KTraits::SharedStorage* smem_storage,
                                         typename KTraits::DTypeO* final_o, float* final_lse,
-                                        float* partial_o, float* partial_lse, float (*o_frag)[8],
-                                        typename KTraits::DTypeQKAccum* m, float* d,
-                                        const uint32_t o_stride_n, const uint32_t o_stride_h,
-                                        const uint32_t q_len, const uint32_t packed_offset,
+                                        typename KTraits::DTypeO* partial_o, float* partial_lse,
+                                        float (*o_frag)[8], typename KTraits::DTypeQKAccum* m,
+                                        float* d, const uint32_t o_stride_n,
+                                        const uint32_t o_stride_h, const uint32_t q_len,
+                                        const uint32_t packed_offset,
                                         const uint_fastdiv& num_heads) {
   using DTypeO = typename KTraits::DTypeO;
   constexpr uint32_t NUM_MMA_D_CKV = KTraits::NUM_MMA_D_CKV;
@@ -673,6 +680,26 @@ __device__ __forceinline__ void write_o(typename KTraits::SharedStorage* smem_st
   constexpr uint32_t UPCAST_STRIDE_FINAL_O = KTraits::UPCAST_STRIDE_FINAL_O;
   const uint32_t lane_idx = threadIdx.x, warpgroup_idx = threadIdx.z, warp_idx_in_wg = threadIdx.y;
   smem_t<KTraits::SWIZZLE_MODE_O> o_smem(smem_storage->o_smem);
+#pragma unroll
+  for (uint32_t mma_d = 0; mma_d < NUM_MMA_D_CKV / 2; ++mma_d) {
+    uint32_t o_frag_f16[8 / 2];
+    vec_cast<DTypeO, float>::cast<8>((DTypeO*)o_frag_f16, o_frag[mma_d]);
+#ifdef FLASHINFER_STMATRIX_M8N8X4_ENABLED
+    uint32_t o_smem_offset_w = o_smem.template get_permuted_offset<UPCAST_STRIDE_FINAL_O>(
+        warp_idx_in_wg * 16 + lane_idx % 16,
+        warpgroup_idx * NUM_MMA_D_CKV + mma_d * 2 + lane_idx / 16);
+    o_smem.template stmatrix_m8n8x4(o_smem_offset_w, o_frag_f16);
+#else
+    uint32_t o_smem_offset_w = o_smem.template get_permuted_offset<UPCAST_STRIDE_FINAL_O>(
+        warp_idx_in_wg * 16 + lane_idx / 4, warpgroup_idx * NUM_MMA_D_CKV + mma_d * 2);
+    ((uint32_t*)(o_smem.base + o_smem_offset_w))[lane_idx % 4] = o_frag_f16[0];
+    ((uint32_t*)(o_smem.base + o_smem_offset_w + 8 * UPCAST_STRIDE_FINAL_O))[lane_idx % 4] =
+        o_frag_f16[1];
+    ((uint32_t*)(o_smem.base + (o_smem_offset_w ^ 0x1)))[lane_idx % 4] = o_frag_f16[2];
+    ((uint32_t*)(o_smem.base + (o_smem_offset_w ^ 0x1) + 8 * UPCAST_STRIDE_FINAL_O))[lane_idx % 4] =
+        o_frag_f16[3];
+#endif
+  }
 
   if (partial_o != nullptr) {
     // write to partial_o
@@ -685,24 +712,27 @@ __device__ __forceinline__ void write_o(typename KTraits::SharedStorage* smem_st
       }
     }
 
+    // step 1. smem to gmem
+    uint32_t o_smem_offset_w = o_smem.template get_permuted_offset<UPCAST_STRIDE_FINAL_O>(
+        warp_idx_in_wg * 16 + lane_idx / 8, warpgroup_idx * NUM_MMA_D_CKV + lane_idx % 8);
 #pragma unroll
-    for (uint32_t j = 0; j < 2; ++j) {
-      uint32_t q_idx = (packed_offset + warp_idx_in_wg * 16 + 8 * j + lane_idx / 4) / num_heads;
+    for (uint32_t j = 0; j < 4; ++j) {
+      uint32_t q_idx = (packed_offset + warp_idx_in_wg * 16 + 4 * j + lane_idx / 8) / num_heads;
+      DTypeO* o_partial_ptr =
+          partial_o +
+          ((blockIdx.x * 4 + warp_idx_in_wg) * 16 + 4 * j + lane_idx / 8) * HEAD_DIM_CKV +
+          warpgroup_idx * (HEAD_DIM_CKV / 2) + (lane_idx % 8) * upcast_size<DTypeO>();
 #pragma unroll
-      for (uint32_t mma_d = 0; mma_d < NUM_MMA_D_CKV / 2; ++mma_d) {
+      for (uint32_t mma_d = 0; mma_d < NUM_MMA_D_CKV / 8; ++mma_d) {
         if (q_idx < q_len) {
-          *reinterpret_cast<float2*>(
-              partial_o +
-              ((blockIdx.x * 4 + warp_idx_in_wg) * 16 + 8 * j + lane_idx / 4) * HEAD_DIM_CKV +
-              warpgroup_idx * (HEAD_DIM_CKV / 2) + mma_d * 16 + (lane_idx % 4) * 2) =
-              *reinterpret_cast<float2*>(&o_frag[mma_d][j * 2]);
-          *reinterpret_cast<float2*>(
-              partial_o +
-              ((blockIdx.x * 4 + warp_idx_in_wg) * 16 + 8 * j + lane_idx / 4) * HEAD_DIM_CKV +
-              warpgroup_idx * (HEAD_DIM_CKV / 2) + mma_d * 16 + 8 + (lane_idx % 4) * 2) =
-              *reinterpret_cast<float2*>(&o_frag[mma_d][4 + j * 2]);
+          o_smem.template store_128b(o_smem_offset_w, o_partial_ptr);
         }
+        o_partial_ptr += 8 * upcast_size<DTypeO>();
+        o_smem_offset_w = o_smem.template advance_offset_by_column<8>(o_smem_offset_w, mma_d);
       }
+      o_smem_offset_w =
+          o_smem.template advance_offset_by_row<4, UPCAST_STRIDE_FINAL_O>(o_smem_offset_w) -
+          NUM_MMA_D_CKV;
     }
   } else {
     // write to final_o
@@ -716,28 +746,6 @@ __device__ __forceinline__ void write_o(typename KTraits::SharedStorage* smem_st
           final_lse[q * num_heads + r] = math::ptx_log2(d[j]) + float(m[j]);
         }
       }
-    }
-
-    // step 0. rmem to smem
-#pragma unroll
-    for (uint32_t mma_d = 0; mma_d < NUM_MMA_D_CKV / 2; ++mma_d) {
-      uint32_t o_frag_f16[8 / 2];
-      vec_cast<DTypeO, float>::cast<8>((DTypeO*)o_frag_f16, o_frag[mma_d]);
-#ifdef FLASHINFER_STMATRIX_M8N8X4_ENABLED
-      uint32_t o_smem_offset_w = o_smem.template get_permuted_offset<UPCAST_STRIDE_FINAL_O>(
-          warp_idx_in_wg * 16 + lane_idx % 16,
-          warpgroup_idx * NUM_MMA_D_CKV + mma_d * 2 + lane_idx / 16);
-      o_smem.template stmatrix_m8n8x4(o_smem_offset_w, o_frag_f16);
-#else
-      uint32_t o_smem_offset_w = o_smem.template get_permuted_offset<UPCAST_STRIDE_FINAL_O>(
-          warp_idx_in_wg * 16 + lane_idx / 4, warpgroup_idx * NUM_MMA_D_CKV + mma_d * 2);
-      ((uint32_t*)(o_smem.base + o_smem_offset_w))[lane_idx % 4] = o_frag_f16[0];
-      ((uint32_t*)(o_smem.base + o_smem_offset_w + 8 * UPCAST_STRIDE_FINAL_O))[lane_idx % 4] =
-          o_frag_f16[1];
-      ((uint32_t*)(o_smem.base + (o_smem_offset_w ^ 0x1)))[lane_idx % 4] = o_frag_f16[2];
-      ((uint32_t*)(o_smem.base + (o_smem_offset_w ^ 0x1) +
-                   8 * UPCAST_STRIDE_FINAL_O))[lane_idx % 4] = o_frag_f16[3];
-#endif
     }
 
     // step 1. smem to gmem
@@ -794,7 +802,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
   DTypeKV* ckv = params.ckv;
   DTypeKV* kpe = params.kpe;
   IdType* kv_indices = params.kv_indices;
-  float* partial_o = params.partial_o;
+  DTypeO* partial_o = params.partial_o;
   float* partial_lse = params.partial_lse;
   DTypeO* final_o = params.final_o;
   float* final_lse = params.final_lse;
@@ -858,9 +866,9 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
     uint32_t block_iter_base = kv_indptr * block_size + kv_start;
     // last kv tile
     __syncthreads();
-    uint32_t kv_bound = kv_indptr + (kv_len + block_size - 1) / block_size;  // ceil_div
+    uint32_t packed_kv_bound = kv_indptr * block_size + kv_len;
     load_kv<KTraits>(&smem_storage, ckv, kpe, kv_indices, ckv_stride_n, ckv_stride_page,
-                     kpe_stride_n, kpe_stride_page, kv_bound,
+                     kpe_stride_n, kpe_stride_page, packed_kv_bound,
                      block_iter_base + kv_tile_idx * CTA_TILE_KV, block_size,
                      kv_tile_idx % NUM_STAGES);
     cp_async::commit_group();
@@ -868,7 +876,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
     for (int stage_idx = 1; stage_idx < NUM_STAGES; ++stage_idx) {
       if (kv_tile_idx - stage_idx >= 0) {
         load_kv<KTraits>(&smem_storage, ckv, kpe, kv_indices, ckv_stride_n, ckv_stride_page,
-                         kpe_stride_n, kpe_stride_page, kv_bound,
+                         kpe_stride_n, kpe_stride_page, packed_kv_bound,
                          block_iter_base + (kv_tile_idx - stage_idx) * CTA_TILE_KV, block_size,
                          (kv_tile_idx - stage_idx) % NUM_STAGES);
         cp_async::commit_group();
@@ -898,7 +906,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
       if (kv_tile_idx - NUM_STAGES >= 0) {
         __syncthreads();
         load_kv<KTraits>(&smem_storage, ckv, kpe, kv_indices, ckv_stride_n, ckv_stride_page,
-                         kpe_stride_n, kpe_stride_page, kv_bound,
+                         kpe_stride_n, kpe_stride_page, packed_kv_bound,
                          block_iter_base + (kv_tile_idx - NUM_STAGES) * CTA_TILE_KV, block_size,
                          (kv_tile_idx - NUM_STAGES) % NUM_STAGES);
         cp_async::commit_group();
@@ -922,7 +930,7 @@ __global__ __launch_bounds__(KTraits::NUM_THREADS) void BatchMLAPagedAttentionKe
 
       __syncthreads();
       load_kv<KTraits>(&smem_storage, ckv, kpe, kv_indices, ckv_stride_n, ckv_stride_page,
-                       kpe_stride_n, kpe_stride_page, kv_bound,
+                       kpe_stride_n, kpe_stride_page, packed_kv_bound,
                        block_iter_base + (kv_tile_idx - NUM_STAGES) * CTA_TILE_KV, block_size,
                        (kv_tile_idx - NUM_STAGES) % NUM_STAGES);
       cp_async::commit_group();

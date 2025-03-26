@@ -27,7 +27,7 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
                                       at::Tensor page_locked_int_workspace_buffer,
                                       at::Tensor qo_indptr, at::Tensor kv_indptr, at::Tensor kv_len,
                                       int64_t num_heads, int64_t head_dim_o, bool causal,
-                                      int64_t batch_size, int64_t cuda_graph_cluster_size, int64_t cuda_stream) {
+                                      int64_t batch_size, int64_t cuda_graph_cluster_size) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * float_workspace_buffer.element_size();
   size_t int_workspace_size_in_bytes =
@@ -35,7 +35,9 @@ at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
 
   MLAPlanInfo plan_info;
 
-  cudaStream_t stream = reinterpret_cast<cudaStream_t>(cuda_stream);
+  const c10::cuda::OptionalCUDAGuard device_guard(float_workspace_buffer.device());
+  const cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+
   cudaError_t status =
       MLAPlan(float_workspace_buffer.data_ptr(), float_workspace_size_in_bytes,
               int_workspace_buffer.data_ptr(), page_locked_int_workspace_buffer.data_ptr(),
