@@ -575,7 +575,7 @@ def test_batch_mla_page_attention(
             sm_scale,
             q_nope.dtype,
             ckv.dtype,
-            bsz_tensor=torch.tensor([batch_size-1], dtype=torch.int32, device="cuda")
+            bsz_tensor=torch.tensor([batch_size], dtype=torch.int32, device="cuda")
         )
 
         # warmup
@@ -604,7 +604,7 @@ def test_batch_mla_page_attention(
         sm_scale,
         q_nope.dtype,
         ckv.dtype,
-        bsz_tensor=torch.tensor([batch_size-1], dtype=torch.int32, device="cuda")
+        bsz_tensor=torch.tensor([batch_size], dtype=torch.int32, device="cuda")
     )
     if use_cuda_graph:
         o.fill_(0)
