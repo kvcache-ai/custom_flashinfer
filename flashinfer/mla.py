@@ -269,8 +269,8 @@ class BatchMLAPagedAttentionWrapper:
         """
         
         cur_batch_size = bsz_tensor.item()
-        cur_batch_size = kv_len_arr_host.shape[0]
-        print(self._use_cuda_graph)
+        #cur_batch_size = kv_len_arr_host.shape[0]
+        #print(self._use_cuda_graph)
 
         self._plan_info = self._cached_module.plan.default(
             self._float_workspace_buffer,
