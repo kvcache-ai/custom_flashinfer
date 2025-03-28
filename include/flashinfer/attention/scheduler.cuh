@@ -1081,6 +1081,7 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   }
   int avg_packed_qo_len = accum_packed_qo_len / batch_size;
 
+  // TODO: verify really needed or not
   int cluster_size = cuda_graph_cluster_size;
   if (cluster_size == 0)
   {
@@ -1091,7 +1092,6 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
           cluster_size = 1;  // one cta in a cluster
       }
   }
-  //printf("cluster_size %d\n", cluster_size);
   
   uint32_t num_clusters = num_sm / cluster_size;
   plan_info.num_blks_x = cluster_size;
@@ -1315,10 +1315,9 @@ inline cudaError_t MLAPlan(void* float_buffer, size_t float_workspace_size_in_by
   FLASHINFER_CUDA_CALL(cudaMemcpyAsync(int_buffer, page_locked_int_buffer, num_bytes_to_copy,
                                        cudaMemcpyHostToDevice, stream));
 
-  constexpr size_t sizeof_dtype_o = 2;
   AlignedAllocator float_allocator(float_buffer, float_workspace_size_in_bytes);
   plan_info.partial_o_offset = float_allocator.aligned_alloc_offset(
-      2 * num_clusters * cluster_tile_q * sizeof_dtype_o * head_dim_o, 16, "mla_partial_o");
+      2 * num_clusters * cluster_tile_q * sizeof(float) * head_dim_o, 16, "mla_partial_o");
   plan_info.partial_lse_offset = float_allocator.aligned_alloc_offset(
       2 * num_clusters * cluster_tile_q * sizeof(float), 16, "mla_partial_lse");
 

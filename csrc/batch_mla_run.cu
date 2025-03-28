@@ -29,7 +29,7 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
                                at::Tensor ckv_cache, at::Tensor kpe_cache, at::Tensor kv_indices,
                                at::Tensor o, std::optional<at::Tensor> maybe_lse,
                                int64_t mask_mode_code, int64_t num_heads, int64_t page_size,
-                               double sm_scale, at::Tensor bsz_tensor) {
+                               double sm_scale) {
   // q_nope: [n, num_heads, head_dim_ckv]
   // q_pe: [n, num_heads, head_dim_kpe]
   // ckv_cache: [num_pages, page_size, head_dim_ckv]
@@ -69,9 +69,6 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
         params.q_pe = static_cast<DTypeQ*>(q_pe.data_ptr());
         params.ckv = static_cast<DTypeKV*>(ckv_cache.data_ptr());
         params.kpe = static_cast<DTypeKV*>(kpe_cache.data_ptr());
-        
-        //TODO: not used. remove it.
-        params.bsz_tensor = static_cast<IdType*>(bsz_tensor.data_ptr());
 
         params.q_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.q_indptr_offset);
         params.kv_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.kv_indptr_offset);
@@ -99,7 +96,7 @@ void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int
         params.final_lse =
             maybe_lse.has_value() ? static_cast<float*>(maybe_lse->data_ptr()) : nullptr;
         params.partial_o =
-            GetPtrFromBaseOffset<DTypeO>(float_buffer_ptr, plan_info.partial_o_offset);
+            GetPtrFromBaseOffset<float>(float_buffer_ptr, plan_info.partial_o_offset);
         params.partial_lse =
             GetPtrFromBaseOffset<float>(float_buffer_ptr, plan_info.partial_lse_offset);
 

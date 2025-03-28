@@ -259,18 +259,7 @@ class BatchMLAPagedAttentionWrapper:
         self._sm_scale = sm_scale
         self._use_profiler = use_profiler
 
-        """
-        print("before plan")
-        print(self._qo_indptr_buf)
-        print(self._kv_indptr_buf)
-        print(self._kv_indices_buf)
-        print(self._kv_len_arr_buf)
-        print(self._bsz_tensor)
-        """
-        
         cur_batch_size = bsz_tensor.item()
-        #cur_batch_size = kv_len_arr_host.shape[0]
-        #print(self._use_cuda_graph)
 
         self._plan_info = self._cached_module.plan.default(
             self._float_workspace_buffer,
@@ -381,7 +370,6 @@ class BatchMLAPagedAttentionWrapper:
             num_heads,
             page_size,
             sm_scale,
-            self._bsz_tensor,
             *profiler_args,  
         )
 
