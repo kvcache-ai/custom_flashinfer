@@ -38,7 +38,6 @@ struct MLAParams {
   DTypeO* final_o;
   float* final_lse;
 
-  IdType* bsz_tensor;
   IdType* q_indptr;
   IdType* kv_indptr;
   IdType* partial_indptr;
