@@ -377,7 +377,7 @@ cudaError_t AppendPagedKVCacheDecode(paged_kv_t<DType, IdType> paged_kv, DType* 
 template <typename DType, typename IdType>
 cudaError_t AppendPagedKVCache(paged_kv_t<DType, IdType> paged_kv, DType* append_key,
                                DType* append_value, IdType* batch_indices, IdType* positions,
-                               uint32_t nnz, uint32_t* nnz_ptr, size_t append_k_stride_n, size_t append_k_stride_h,
+                               uint32_t nnz, int32_t* nnz_ptr, size_t append_k_stride_n, size_t append_k_stride_h,
                                size_t append_v_stride_n, size_t append_v_stride_h,
                                cudaStream_t stream = nullptr) {
   uint32_t head_dim = paged_kv.head_dim;

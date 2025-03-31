@@ -1365,25 +1365,25 @@ class BatchPrefillWithPagedKVCacheWrapper:
                     )
                 )
 
-            if batch_size != self._fixed_batch_size:
-                raise ValueError(
-                    "The batch size should be fixed during the lifecycle of the wrapper in "
-                    "cuda graph mode, the runtime batch size {} mismatches the batch size {} "
-                    " set during initialization.".format(
-                        batch_size, self._fixed_batch_size
-                    )
-                )
+            # if batch_size != self._fixed_batch_size:
+            #     raise ValueError(
+            #         "The batch size should be fixed during the lifecycle of the wrapper in "
+            #         "cuda graph mode, the runtime batch size {} mismatches the batch size {} "
+            #         " set during initialization.".format(
+            #             batch_size, self._fixed_batch_size
+            #         )
+            #     )
             if len(paged_kv_indices) > len(self._paged_kv_indices_buf):
                 raise ValueError(
                     "The length of paged_kv_indices exceeds the allocated buffer size."
                 )
 
-            self._qo_indptr_buf.copy_(qo_indptr, non_blocking=non_blocking)
-            self._paged_kv_indptr_buf.copy_(paged_kv_indptr, non_blocking=non_blocking)
+            self._qo_indptr_buf[:qo_indptr.size(0)].copy_(qo_indptr, non_blocking=non_blocking)
+            self._paged_kv_indptr_buf[:paged_kv_indptr.size(0)].copy_(paged_kv_indptr, non_blocking=non_blocking)
             self._paged_kv_indices_buf[: len(paged_kv_indices)].copy_(
                 paged_kv_indices, non_blocking=non_blocking
             )
-            self._paged_kv_last_page_len_buf.copy_(
+            self._paged_kv_last_page_len_buf[:paged_kv_last_page_len.size(0)].copy_(
                 paged_kv_last_page_len, non_blocking=non_blocking
             )
 

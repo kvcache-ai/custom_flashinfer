@@ -17,7 +17,7 @@
 
 void append_paged_kv_cache(at::Tensor append_key, at::Tensor append_value, at::Tensor batch_indices,
                            at::Tensor positions, at::Tensor paged_k_cache, at::Tensor paged_v_cache,
-                           at::Tensor kv_indices, at::Tensor kv_indptr, at::Tensor kv_last_page_len, torch::Tensor nnz_tensor, 
+                           at::Tensor kv_indices, at::Tensor kv_indptr, at::Tensor kv_last_page_len, at::Tensor nnz_tensor, 
                            int64_t layout, int64_t cuda_stream);
 
 void block_sparse_indices_to_vector_sparse_offsets(at::Tensor block_sparse_indices,
