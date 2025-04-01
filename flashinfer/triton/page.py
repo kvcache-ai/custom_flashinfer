@@ -27,9 +27,13 @@ def get_batch_indices_positions_kernel(
     seq_lens_ptr,
     batch_indices_ptr,
     positions_ptr,
+    batch_size_ptr,
     num_stages: tl.constexpr,
 ):
     batch_idx = tl.program_id(0)
+    batch_size = tl.load(batch_size_ptr)
+    if batch_idx >= batch_size:
+        return 
 
     batch_start = tl.load(append_indptr + batch_idx)
     batch_end = tl.load(append_indptr + batch_idx + 1)

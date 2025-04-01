@@ -43,8 +43,10 @@ using namespace flashinfer;
 at::Tensor BatchPrefillWithKVCachePlan(
     at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
     at::Tensor page_locked_int_workspace_buffer, at::Tensor qo_indptr, at::Tensor kv_indptr,
-    at::Tensor kv_len_arr, int64_t total_num_rows, int64_t batch_size, int64_t num_qo_heads,
-    int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph, int64_t head_dim_qk,
+    at::Tensor kv_len_arr, int64_t total_num_rows, int64_t batch_size, int64_t max_batch_size, 
+    int64_t num_qo_heads, int64_t num_kv_heads, int64_t page_size, 
+    int64_t capture_padded_batch_size, int64_t capture_cta_tile_q,
+    bool enable_cuda_graph, int64_t head_dim_qk,
     int64_t head_dim_vo, bool causal) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * float_workspace_buffer.element_size();
@@ -59,8 +61,9 @@ at::Tensor BatchPrefillWithKVCachePlan(
       float_workspace_buffer.data_ptr(), float_workspace_size_in_bytes,
       int_workspace_buffer.data_ptr(), page_locked_int_workspace_buffer.data_ptr(),
       int_workspace_size_in_bytes, plan_info, qo_indptr.data_ptr<IdType>(),
-      kv_indptr.data_ptr<IdType>(), total_num_rows, batch_size, num_qo_heads, num_kv_heads,
-      head_dim_qk, head_dim_vo, page_size, enable_cuda_graph, /*sizeof_dtype_o=*/2, stream);
+      kv_indptr.data_ptr<IdType>(), total_num_rows, batch_size, max_batch_size,
+      num_qo_heads, num_kv_heads, head_dim_qk, head_dim_vo, page_size, 
+      capture_padded_batch_size, capture_cta_tile_q, enable_cuda_graph, /*sizeof_dtype_o=*/2, stream);
 
   TORCH_CHECK(status == cudaSuccess,
               "Failed to plan prefill with error: ", cudaGetErrorString(status));
@@ -276,6 +279,7 @@ void BatchPrefillWithPagedKVCacheRun(at::Tensor float_workspace_buffer,
         params.merge_indptr = nullptr;
         params.o_indptr = nullptr;
         params.kv_chunk_size_ptr = nullptr;
+        params.batch_size_ptr = nullptr;
         params.block_valid_mask = nullptr;
         params.total_num_rows = nullptr;
         params.max_total_num_rows = 0;
@@ -296,6 +300,8 @@ void BatchPrefillWithPagedKVCacheRun(at::Tensor float_workspace_buffer,
         params.o_indptr = GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.o_indptr_offset);
         params.kv_chunk_size_ptr =
             GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.kv_chunk_size_ptr_offset);
+        params.batch_size_ptr =
+            GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.batch_size_ptr_offset);
         if (plan_info.split_kv) {
           params.merge_indptr =
               GetPtrFromBaseOffset<IdType>(int_buffer_ptr, plan_info.merge_indptr_offset);

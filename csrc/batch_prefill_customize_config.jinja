@@ -104,6 +104,7 @@ struct PagedParams {
   IdType* o_indptr;
   bool* block_valid_mask;
   IdType* kv_chunk_size_ptr;
+  IdType* batch_size_ptr;
   uint32_t max_total_num_rows;
   uint32_t* total_num_rows;
   uint32_t padded_batch_size;

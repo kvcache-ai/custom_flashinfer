@@ -1111,18 +1111,18 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 raise ValueError(
                     "paged_kv_last_page_len_buf should be a torch.Tensor in CUDA graph mode"
                 )
-            self._fixed_batch_size = len(qo_indptr_buf) - 1
-            if len(paged_kv_indptr_buf) != self._fixed_batch_size + 1:
+            self.max_batch_size = len(qo_indptr_buf) - 1
+            if len(paged_kv_indptr_buf) != self.max_batch_size + 1:
                 raise ValueError(
                     "The length of paged_kv_indptr_buf should be batch_size + 1."
                 )
-            if len(paged_kv_last_page_len_buf) != self._fixed_batch_size:
+            if len(paged_kv_last_page_len_buf) != self.max_batch_size:
                 raise ValueError(
                     "The length of paged_kv_last_page_len_buf should be batch_size."
                 )
             # NOTE(Zihao): do not check custom_mask_buf and mask_indptr_buf here, as they are optional
         else:
-            self._fixed_batch_size = 0
+            self.max_batch_size = 0
 
         self._qo_indptr_buf = qo_indptr_buf
         self._paged_kv_indptr_buf = paged_kv_indptr_buf
@@ -1132,6 +1132,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         self._mask_indptr_buf = mask_indptr_buf
         self._max_total_num_rows = None
         self._backend = backend
+        self._plan_info = None
 
     @property
     def is_cuda_graph_enabled(self) -> bool:
@@ -1322,22 +1323,14 @@ class BatchPrefillWithPagedKVCacheWrapper:
                     )
                 )
 
-            if batch_size != self._fixed_batch_size:
-                raise ValueError(
-                    "The batch size should be fixed during the lifecycle of the wrapper in "
-                    "cuda graph mode, the runtime batch size {} mismatches the batch size {} "
-                    " set during initialization.".format(
-                        batch_size, self._fixed_batch_size
-                    )
-                )
             if len(paged_kv_indices) > len(self._paged_kv_indices_buf):
                 raise ValueError(
                     "The length of paged_kv_indices exceeds the allocated buffer size."
                 )
 
-            self._qo_indptr_buf.copy_(qo_indptr, non_blocking=non_blocking)
-            self._paged_kv_indptr_buf.copy_(paged_kv_indptr, non_blocking=non_blocking)
-            self._paged_kv_last_page_len_buf.copy_(
+            self._qo_indptr_buf[:len(qo_indptr)].copy_(qo_indptr, non_blocking=non_blocking)
+            self._paged_kv_indptr_buf[:len(paged_kv_indptr)].copy_(paged_kv_indptr, non_blocking=non_blocking)
+            self._paged_kv_last_page_len_buf[:len(paged_kv_last_page_len)].copy_(
                 paged_kv_last_page_len, non_blocking=non_blocking
             )
             self._paged_kv_indices_buf[: len(paged_kv_indices)].copy_(
@@ -1438,15 +1431,17 @@ class BatchPrefillWithPagedKVCacheWrapper:
             kv_lens_arr_host,
             self._max_total_num_rows or total_num_rows,
             batch_size,
+            self.max_batch_size,
             num_qo_heads,
             num_kv_heads,
             page_size,
+            self._plan_info[0] if self._plan_info is not None else 0,
+            self._plan_info[3] if self._plan_info is not None else 0,
             self.is_cuda_graph_enabled,
             head_dim_qk,
             head_dim_vo,
             causal,
         )
-
         self._causal = causal
         self._pos_encoding_mode = pos_encoding_mode
         self._use_fp16_qk_reduction = use_fp16_qk_reduction

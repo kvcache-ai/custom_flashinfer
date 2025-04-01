@@ -18,7 +18,7 @@
 void append_paged_kv_cache(at::Tensor append_key, at::Tensor append_value, at::Tensor batch_indices,
                            at::Tensor positions, at::Tensor paged_k_cache, at::Tensor paged_v_cache,
                            at::Tensor kv_indices, at::Tensor kv_indptr, at::Tensor kv_last_page_len,
-                           int64_t layout);
+                           at::Tensor nnz_tensor, int64_t layout);
 
 void append_paged_mla_kv_cache(at::Tensor append_ckv, at::Tensor append_kpe,
                                at::Tensor batch_indices, at::Tensor positions, at::Tensor ckv_cache,

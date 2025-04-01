@@ -19,9 +19,10 @@
 at::Tensor BatchPrefillWithKVCachePlan(
     at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
     at::Tensor page_locked_int_workspace_buffer, at::Tensor qo_indptr, at::Tensor kv_indptr,
-    at::Tensor kv_len_arr, int64_t total_num_rows, int64_t batch_size, int64_t num_qo_heads,
-    int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph, int64_t head_dim_qk,
-    int64_t head_dim_vo, bool causal);
+    at::Tensor kv_len_arr, int64_t total_num_rows, int64_t batch_size, int64_t max_batch_size, 
+    int64_t num_qo_heads, int64_t num_kv_heads, int64_t page_size, 
+    int64_t capture_padded_batch_size, int64_t capture_cta_tile_q,
+    bool enable_cuda_graph, int64_t head_dim_qk, int64_t head_dim_vo, bool causal);
 
 void BatchPrefillWithRaggedKVCacheRun(at::Tensor float_workspace_buffer,
                                       at::Tensor int_workspace_buffer, at::Tensor plan_info_vec,
