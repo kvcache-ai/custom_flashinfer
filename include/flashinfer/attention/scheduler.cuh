@@ -703,6 +703,7 @@ inline cudaError_t PrefillPlan(void* float_buffer, size_t float_workspace_size_i
   int num_blocks_per_sm = 2;
   int max_grid_size = num_blocks_per_sm * num_sm;
   uint32_t max_batch_size_if_split = max_grid_size / num_kv_heads;
+  max_batch_size_if_split = max(max_batch_size_if_split, capture_padded_batch_size);
 
   // step 2: determine kv_chunk_size
   auto [split_kv, new_batch_size, padded_batch_size, cta_tile_q, kv_chunk_size, request_indices_vec,
