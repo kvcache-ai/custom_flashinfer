@@ -579,12 +579,13 @@ __global__ void AppendPagedKVMlaCacheKernel(paged_kv_mla_t<DType, IdType> paged_
                                             DType* __restrict__ append_ckv,
                                             DType* __restrict__ append_kpe,
                                             IdType* __restrict__ batch_indices,
-                                            IdType* __restrict__ positions, uint32_t nnz,
+                                            IdType* __restrict__ positions, uint32_t* nnz_ptr,
                                             size_t append_ckv_stride_n,
                                             size_t append_kpe_stride_n) {
   uint32_t tx = threadIdx.x;
   uint32_t cta_id = blockIdx.x;
   uint32_t num_ctas = gridDim.x;
+  uint32_t nnz = *nnz_ptr;
 
 #pragma unroll 4
   for (uint32_t i = cta_id; i < nnz; i += num_ctas) {
@@ -605,7 +606,7 @@ __global__ void AppendPagedKVMlaCacheKernel(paged_kv_mla_t<DType, IdType> paged_
 template <typename DType, typename IdType>
 cudaError_t AppendPagedKVMlaCache(paged_kv_mla_t<DType, IdType> paged_kv, DType* append_ckv,
                                   DType* append_kpe, IdType* batch_indices, IdType* positions,
-                                  uint32_t nnz, size_t append_ckv_stride_n,
+                                  uint32_t nnz, uint32_t* nnz_ptr, size_t append_ckv_stride_n,
                                   size_t append_kpe_stride_n, cudaStream_t stream = nullptr) {
   int dev_id = 0;
   int num_sms = 0;
@@ -635,7 +636,7 @@ cudaError_t AppendPagedKVMlaCache(paged_kv_mla_t<DType, IdType> paged_kv, DType*
                   (void*)&append_kpe,
                   (void*)&batch_indices,
                   (void*)&positions,
-                  (void*)&nnz,
+                  (void*)&nnz_ptr,
                   (void*)&append_ckv_stride_n,
                   (void*)&append_kpe_stride_n};
   FLASHINFER_CUDA_CALL(cudaLaunchKernel((void*)kernel, nblks, nthrs, args, 0, stream));

@@ -141,7 +141,7 @@ void block_sparse_indices_to_vector_sparse_offsets(
 void append_paged_mla_kv_cache(at::Tensor append_ckv, at::Tensor append_kpe,
                                at::Tensor batch_indices, at::Tensor positions, at::Tensor ckv_cache,
                                at::Tensor kpe_cache, at::Tensor kv_indices, at::Tensor kv_indptr,
-                               at::Tensor kv_last_page_len) {
+                               at::Tensor kv_last_page_len, at::Tensor nnz_tensor) {
   CHECK_LAST_DIM_CONTIGUOUS(append_ckv);
   CHECK_LAST_DIM_CONTIGUOUS(append_kpe);
   CHECK_INPUT(batch_indices);
@@ -206,7 +206,8 @@ void append_paged_mla_kv_cache(at::Tensor append_ckv, at::Tensor append_kpe,
         AppendPagedKVMlaCache(paged_mla_kv, static_cast<c_type*>(append_ckv.data_ptr()),
                               static_cast<c_type*>(append_kpe.data_ptr()),
                               static_cast<int32_t*>(batch_indices.data_ptr()),
-                              static_cast<int32_t*>(positions.data_ptr()), nnz, append_ckv_stride_n,
+                              static_cast<int32_t*>(positions.data_ptr()), nnz, static_cast<uint32_t*>(nnz_tensor.data_ptr()), 
+                              append_ckv_stride_n,
                               append_kpe_stride_n, stream);
     TORCH_CHECK(status == cudaSuccess,
                 "AppendPagedKVMlaCache failed with error: ", cudaGetErrorString(status));

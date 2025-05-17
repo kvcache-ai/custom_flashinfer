@@ -107,6 +107,7 @@ def _append_paged_mla_kv_cache_kernel(
     kv_indices: torch.Tensor,
     kv_indptr: torch.Tensor,
     kv_last_page_len: torch.Tensor,
+    nnz_tensor: torch.Tensor,
 ) -> None:
     batch_indices = batch_indices.int()
     positions = positions.int()
@@ -123,6 +124,7 @@ def _append_paged_mla_kv_cache_kernel(
         kv_indices,
         kv_indptr,
         kv_last_page_len,
+        nnz_tensor,
     )
 
 
@@ -272,6 +274,7 @@ def append_paged_mla_kv_cache(
     kv_indices: torch.Tensor,
     kv_indptr: torch.Tensor,
     kv_last_page_len: torch.Tensor,
+    num_tokens_tensor: torch.Tensor,
 ) -> None:
     r"""Append a batch of key-value pairs to a paged key-value cache,
     Note: current only support ckv=512 and kpe=64
@@ -308,6 +311,7 @@ def append_paged_mla_kv_cache(
         kv_indices,
         kv_indptr,
         kv_last_page_len,
+        num_tokens_tensor
     )
 
 
