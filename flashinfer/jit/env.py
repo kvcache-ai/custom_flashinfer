@@ -33,7 +33,7 @@ def _get_workspace_dir_name() -> pathlib.Path:
     except Exception:
         arch = "noarch"
     # e.g.: $HOME/.cache/flashinfer/75_80_89_90/
-    return pathlib.Path.home() / ".cache" / "flashinfer" / arch
+    return pathlib.Path.home() / ".cache" / "custom_flashinfer" / arch
 
 
 # use pathlib
