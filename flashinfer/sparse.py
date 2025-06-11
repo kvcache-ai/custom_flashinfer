@@ -32,6 +32,8 @@ from .utils import (
     _get_cache_alibi_slopes_buf,
     canonicalize_torch_dtype,
     determine_attention_backend,
+    device_support_pdl,
+    is_float8,
 )
 
 
@@ -206,6 +208,7 @@ class BlockSparseAttentionWrapper:
         rope_theta: Optional[float] = None,
         q_data_type: Union[str, torch.dtype] = "float16",
         kv_data_type: Optional[Union[str, torch.dtype]] = None,
+        o_data_type: Union[str, torch.dtype] = "float16",
         non_blocking: bool = True,
     ) -> None:
         r"""Create auxiliary data structures for block sparse attention.
@@ -268,6 +271,9 @@ class BlockSparseAttentionWrapper:
             The data type of the query tensor.
         kv_data_type : Optional[Union[str, torch.dtype]]
             The data type of the key/value tensor. If None, will be set to :attr:`q_data_type`.
+        o_data_type : str, optional
+            The data type of the output tensor. Default is ``half``. As output dtype cannot
+            be inferred by input dtype in quantization
         non_blocking : bool
             Whether to copy the input tensors to the device asynchronously, defaults to ``True``.
 
@@ -284,6 +290,7 @@ class BlockSparseAttentionWrapper:
         if kv_data_type is None:
             kv_data_type = q_data_type
         kv_data_type = canonicalize_torch_dtype(kv_data_type)
+        self._o_dtype = canonicalize_torch_dtype(o_data_type)
 
         if logits_soft_cap is None:
             logits_soft_cap = 0.0
@@ -346,13 +353,14 @@ class BlockSparseAttentionWrapper:
         if (
             R * (num_qo_heads // num_kv_heads) < 4
             and mask_mode != MaskMode.CUSTOM.value
+            and q_data_type not in [torch.float8_e4m3fn, torch.float8_e5m2]
         ):
             # If the operation is not compute-bound, we use the cuda-core implementation
             self._use_tensor_cores = False
             self._cached_module = get_batch_decode_module(
                 q_data_type,
                 kv_data_type,
-                q_data_type,
+                self._o_dtype,
                 indptr.dtype,
                 head_dim,
                 head_dim,
@@ -395,7 +403,7 @@ class BlockSparseAttentionWrapper:
             get_module_args = (
                 q_data_type,
                 kv_data_type,
-                q_data_type,
+                self._o_dtype,
                 indptr.dtype,
                 head_dim,  # head_dim_qk
                 head_dim,  # head_dim_vo
@@ -459,6 +467,9 @@ class BlockSparseAttentionWrapper:
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        scale_q: Optional[torch.Tensor] = None,
+        scale_k: Optional[torch.Tensor] = None,
+        scale_v: Optional[torch.Tensor] = None,
         pos_encoding_mode: str = "NONE",
         use_fp16_qk_reduction: bool = False,
         logits_soft_cap: Optional[float] = None,
@@ -473,16 +484,20 @@ class BlockSparseAttentionWrapper:
         self._sm_scale = sm_scale
         self._rope_scale = rope_scale
         self._rope_theta = rope_theta
-        return self.run(q, k, v)
+        return self.run(q, k, v, scale_q, scale_k, scale_v)
 
     def run(
         self,
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
+        scale_q: Optional[torch.Tensor] = None,
+        scale_k: Optional[torch.Tensor] = None,
+        scale_v: Optional[torch.Tensor] = None,
         out: Optional[torch.Tensor] = None,
         lse: Optional[torch.Tensor] = None,
         return_lse: bool = False,
+        enable_pdl: Optional[bool] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         r"""Compute block-sparse attention between Q/K/V tensors.
 
@@ -494,12 +509,24 @@ class BlockSparseAttentionWrapper:
             The key tensor with shape ``(N, num_kv_heads, head_dim)``.
         v : torch.Tensor
             The value tensor with shape ``(N, num_kv_heads, head_dim)``.
+        scale_q : Optional[torch.Tensor]
+            The scale tensor for query, per-head quantization with shape: ``[num_qo_heads]``.
+            Used with FP8 Quantization. If not provided, will be set to ``1.0``.
+        scale_k : Optional[torch.Tensor]
+            The scale tensor for key, per-head quantization with shape: ``[num_kv_heads]``.
+            Used with FP8 Quantization. If not provided, will be set to ``1.0``.
+        scale_v : Optional[torch.Tensor]
+            The scale tensor for value, per-head quantization with shape: ``[num_kv_heads]``.
+            Used with FP8 Quantization. If not provided, will be set to ``1.0``.
         out : Optional[torch.Tensor]
             The output tensor, if not provided, will be allocated internally.
         lse : Optional[torch.Tensor]
             The log-sum-exp of attention logits, if not provided, will be allocated internally.
         return_lse : bool
             Whether to return the log-sum-exp of attention logits
+        enable_pdl : bool
+            Whether to enable Programmatic Dependent Launch (PDL). See https://docs.nvidia.com/cuda/cuda-c-programming-guide/#programmatic-dependent-launch-and-synchronization
+            Only supported for >= sm90, and currently only for FA2 and CUDA core decode.
 
         Returns
         -------
@@ -510,6 +537,9 @@ class BlockSparseAttentionWrapper:
             * The attention output, shape: ``[M, num_qo_heads, head_dim]``.
             * The logsumexp of attention output, shape: ``[M, num_qo_heads]``.
         """
+        if enable_pdl is None:
+            enable_pdl = device_support_pdl(q.device)
+
         pos_encoding_mode = self._pos_encoding_mode
         logits_soft_cap = self._logits_soft_cap
         sm_scale = self._sm_scale
@@ -541,9 +571,22 @@ class BlockSparseAttentionWrapper:
                 )
 
         if out is None:
-            out = torch.empty_like(q)
+            out = torch.empty_like(q, dtype=self._o_dtype)
         else:
-            _check_shape_dtype_device(out, q.shape, q.dtype, q.device, "out")
+            _check_shape_dtype_device(out, q.shape, self._o_dtype, q.device, "out")
+
+        if is_float8(q):
+            assert q.dtype == k.dtype == v.dtype
+            assert q.shape[-1] == k.shape[-1] == v.shape[-1]
+            assert self._backend == "fa3" and self._use_tensor_cores
+
+            if scale_q is None:
+                scale_q = torch.ones(q.shape[1], dtype=torch.float32, device=q.device)
+            if scale_k is None:
+                scale_k = torch.ones(k.shape[1], dtype=torch.float32, device=q.device)
+            if scale_v is None:
+                scale_v = torch.ones(v.shape[1], dtype=torch.float32, device=q.device)
+
         if self._use_tensor_cores:
             if self._backend == "fa3":
                 sparse_indices = block_sparse_indices_to_vector_sparse_offsets(
@@ -577,13 +620,22 @@ class BlockSparseAttentionWrapper:
                 self._mask_mode,
                 TensorLayout[self._kv_layout].value,
                 -1,  # window_left
+                enable_pdl,
+                # ADDITIONAL_FUNC_PARAMS
                 self._packed_mask_buf,
                 self._mask_indptr_buf,
                 _get_cache_alibi_slopes_buf(q.shape[1], self.device),
+                None,  # maybe_prefix_len_ptr
+                None,  # maybe_token_pos_in_items_ptr
+                None,  # maybe_max_item_len_ptr
                 logits_soft_cap,
                 sm_scale,
+                scale_q,
+                scale_k,
+                scale_v,
                 rope_scale,
                 rope_theta,
+                0,  # token_pos_in_items_len
             )
         else:
             self._cached_module.run(
@@ -600,6 +652,8 @@ class BlockSparseAttentionWrapper:
                 lse,
                 TensorLayout[self._kv_layout].value,
                 -1,  # window_left
+                enable_pdl,
+                # ADDITIONAL_FUNC_PARAMS
                 _get_cache_alibi_slopes_buf(q.shape[1], self.device),
                 logits_soft_cap,
                 sm_scale,

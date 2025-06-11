@@ -19,27 +19,28 @@ from typing import Any, Optional, Tuple
 
 import torch
 
-from .jit import FLASHINFER_CSRC_DIR, has_prebuilt_ops, load_cuda_ops
+from .jit import JitSpec
+from .jit import env as jit_env
+from .jit import gen_jit_spec
 from .utils import register_custom_op, register_fake_op
 
 _rope_module = None
 
 
+def gen_rope_module() -> JitSpec:
+    return gen_jit_spec(
+        "rope",
+        [
+            jit_env.FLASHINFER_CSRC_DIR / "rope.cu",
+            jit_env.FLASHINFER_CSRC_DIR / "flashinfer_rope_ops.cu",
+        ],
+    )
+
+
 def get_rope_module():
     global _rope_module
     if _rope_module is None:
-        if has_prebuilt_ops:
-            _kernels = torch.ops.flashinfer_kernels
-
-            _rope_module = _kernels
-        else:
-            _rope_module = load_cuda_ops(
-                "rope",
-                [
-                    FLASHINFER_CSRC_DIR / "rope.cu",
-                    FLASHINFER_CSRC_DIR / "flashinfer_rope_ops.cu",
-                ],
-            )
+        _rope_module = gen_rope_module().build_and_load()
     return _rope_module
 
 
@@ -64,8 +65,6 @@ def _apply_rope(
     rope_scale: float,
     rope_theta: float,
 ) -> None:
-    indptr = indptr.int()
-    offsets = offsets.int()
     get_module_attr("apply_rope")(
         q,
         k,
@@ -112,8 +111,6 @@ def _apply_llama31_rope(
     high_freq_factor: float,
     old_context_len: float,
 ) -> None:
-    indptr = indptr.int()
-    offsets = offsets.int()
     get_module_attr("apply_llama31_rope")(
         q,
         k,
@@ -162,7 +159,6 @@ def _apply_rope_pos_ids(
     rope_scale: float,
     rope_theta: float,
 ) -> None:
-    pos_ids = pos_ids.int()
     get_module_attr("apply_rope_pos_ids")(
         q,
         k,
@@ -203,7 +199,6 @@ def _apply_rope_pos_ids_cos_sin_cache(
     pos_ids: torch.Tensor,
     interleave: bool,
 ) -> None:
-    pos_ids = pos_ids.int()
     get_module_attr("apply_rope_pos_ids_cos_sin_cache")(
         q,
         k,
@@ -246,7 +241,6 @@ def _apply_llama31_rope_pos_ids(
     high_freq_factor: float,
     old_context_len: float,
 ) -> None:
-    pos_ids = pos_ids.int()
     get_module_attr("apply_llama31_rope_pos_ids")(
         q,
         k,
@@ -298,7 +292,7 @@ def apply_rope_inplace(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -384,7 +378,7 @@ def apply_rope_pos_ids_inplace(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -446,7 +440,7 @@ def apply_llama31_rope_inplace(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -553,7 +547,7 @@ def apply_llama31_rope_pos_ids_inplace(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -629,7 +623,7 @@ def apply_rope(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -738,7 +732,7 @@ def apply_rope_pos_ids(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -810,7 +804,7 @@ def apply_llama31_rope(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters
@@ -931,7 +925,7 @@ def apply_llama31_rope_pos_ids(
     segment the query of the i-th segment is ``q[indptr[i]:indptr[i+1]]`` and the key of the
     i-th segment is ``k[indptr[i]:indptr[i+1]]``, the first element of :attr:`indptr` is always
     0 and the last element of :attr:`indptr` is the total number of queries/keys in the batch.
-    Please see :ref:`Ragged Tensor tutorial <ragged-layout>` for more details about the
+    Please see :ref:`Ragged Tensor tutorial <kv-layout>` for more details about the
     ragged tensor.
 
     Parameters

@@ -35,7 +35,7 @@ void merge_states(at::Tensor v, at::Tensor s, at::Tensor v_merged, at::Tensor s_
 //========== decode ==========
 
 void single_decode_with_kv_cache(at::Tensor q, at::Tensor k, at::Tensor v, at::Tensor tmp,
-                                 at::Tensor o, int64_t layout,
+                                 at::Tensor o, std::optional<at::Tensor> maybe_lse, int64_t layout,
                                  int64_t window_left SINGLE_DECODE_ADDITIONAL_FUNC_PARAMS);
 
 at::Tensor BatchDecodeWithPagedKVCachePlan(
@@ -51,8 +51,8 @@ void BatchDecodeWithPagedKVCacheRun(at::Tensor float_workspace_buffer,
                                     at::Tensor paged_v_cache, at::Tensor paged_kv_indptr,
                                     at::Tensor paged_kv_indices, at::Tensor paged_kv_last_page_len,
                                     at::Tensor o, std::optional<at::Tensor> maybe_lse,
-                                    int64_t kv_layout_code,
-                                    int64_t window_left BATCH_DECODE_ADDITIONAL_FUNC_PARAMS);
+                                    int64_t kv_layout_code, int64_t window_left,
+                                    bool enable_pdl BATCH_DECODE_ADDITIONAL_FUNC_PARAMS);
 
 //========== gemm ==========
 
@@ -138,7 +138,8 @@ void pod_with_kv_cache_tensor(
     std::optional<at::Tensor> maybe_lse_d, int64_t mask_mode_code_d, int64_t layout_d,
     int64_t window_left, std::optional<at::Tensor> maybe_custom_mask_d,
     std::optional<at::Tensor> maybe_mask_indptr_d, std::optional<at::Tensor> maybe_alibi_slopes_d,
-    double logits_soft_cap_d, double sm_scale_d, double rope_rcp_scale_d, double rope_rcp_theta_d);
+    double logits_soft_cap_d, double sm_scale_d, double rope_rcp_scale_d, double rope_rcp_theta_d,
+    bool enable_pdl);
 //========== quantization ==========
 
 void packbits(at::Tensor x, const std::string& bitorder, at::Tensor y);
@@ -176,6 +177,10 @@ void sampling_from_probs(at::Tensor probs, at::Tensor output,
                          std::optional<at::Tensor> maybe_indices, bool deterministic,
                          std::optional<at::Generator> gen);
 
+void sampling_from_logits(at::Tensor logits, at::Tensor output,
+                          std::optional<at::Tensor> maybe_indices, bool deterministic,
+                          std::optional<at::Generator> gen);
+
 void top_p_sampling_from_probs(at::Tensor probs, at::Tensor output,
                                std::optional<at::Tensor> maybe_indices,
                                std::optional<at::Tensor> maybe_top_p_arr, double top_p_val,
@@ -209,7 +214,7 @@ void top_k_mask_logits(at::Tensor logits, at::Tensor mask_logits,
 void chain_speculative_sampling(at::Tensor draft_probs, at::Tensor draft_token_ids,
                                 at::Tensor target_probs, at::Tensor output_token_ids,
                                 at::Tensor output_accepted_token_num,
-                                at::Tensor output_emitted_token_num, bool deterministic,
+                                at::Tensor output_emitted_draft_token_num, bool deterministic,
                                 std::optional<at::Generator> gen);
 
 //========== Torch Library ==========
@@ -294,6 +299,8 @@ TORCH_LIBRARY_FRAGMENT(TORCH_EXTENSION_NAME, m) {
   // sampling
   // Sample from probabilities
   m.def("sampling_from_probs", sampling_from_probs);
+  // Sample from logits
+  m.def("sampling_from_logits", sampling_from_logits);
   // Top-k sampling from probabilities
   m.def("top_k_sampling_from_probs", top_k_sampling_from_probs);
   // Min-p sampling from probabilities

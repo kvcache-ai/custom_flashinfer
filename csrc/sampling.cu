@@ -25,6 +25,33 @@
 
 using namespace flashinfer;
 
+void sampling_from_logits(at::Tensor logits, at::Tensor output,
+                          std::optional<at::Tensor> maybe_indices, bool deterministic,
+                          std::optional<at::Generator> gen_) {
+  CHECK_INPUT(logits);
+  auto device = logits.device();
+  CHECK_DIM(2, logits);  // logits: (batch_size, vocab_size)
+  unsigned int batch_size = output.size(0);
+  unsigned int vocab_size = logits.size(1);
+
+  uint64_t philox_seed, philox_offset;
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+      gen_, at::cuda::detail::getDefaultCUDAGenerator());
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  at::PhiloxCudaState rng_engine_inputs = gen->philox_cuda_state(batch_size * vocab_size);
+  philox_seed = rng_engine_inputs.seed_.val;
+  philox_offset = rng_engine_inputs.offset_.val;
+
+  const c10::cuda::OptionalCUDAGuard device_guard(device);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  cudaError_t status = sampling::SamplingFromLogits(
+      static_cast<float*>(logits.data_ptr()), static_cast<int*>(output.data_ptr()),
+      maybe_indices.has_value() ? static_cast<int*>(maybe_indices->data_ptr()) : nullptr,
+      batch_size, vocab_size, deterministic, philox_seed, philox_offset, stream);
+  TORCH_CHECK(status == cudaSuccess, "SamplingFromLogits failed with error code " +
+                                         std::string(cudaGetErrorString(status)));
+}
+
 void sampling_from_probs(at::Tensor probs, at::Tensor output,
                          std::optional<at::Tensor> maybe_indices, bool deterministic,
                          std::optional<at::Generator> gen_) {
@@ -186,7 +213,7 @@ void top_k_top_p_sampling_from_probs(at::Tensor probs, at::Tensor output,
 void chain_speculative_sampling(at::Tensor draft_probs, at::Tensor draft_token_ids,
                                 at::Tensor target_probs, at::Tensor output_token_ids,
                                 at::Tensor output_accepted_token_num,
-                                at::Tensor output_emitted_token_num, bool deterministic,
+                                at::Tensor output_emitted_draft_token_num, bool deterministic,
                                 std::optional<at::Generator> gen_) {
   CHECK_INPUT(draft_probs);
   CHECK_INPUT(draft_token_ids);
@@ -205,7 +232,7 @@ void chain_speculative_sampling(at::Tensor draft_probs, at::Tensor draft_token_i
   CHECK_EQ(num_speculate_tokens + 1, target_probs.size(1));
   CHECK_EQ(vocab_size, target_probs.size(2));
   CHECK_EQ(batch_size, output_accepted_token_num.size(0));
-  CHECK_EQ(batch_size, output_emitted_token_num.size(0));
+  CHECK_EQ(batch_size, output_emitted_draft_token_num.size(0));
   uint64_t philox_seed, philox_offset;
   auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
       gen_, at::cuda::detail::getDefaultCUDAGenerator());
@@ -221,8 +248,8 @@ void chain_speculative_sampling(at::Tensor draft_probs, at::Tensor draft_token_i
       static_cast<float*>(draft_probs.data_ptr()), static_cast<int*>(draft_token_ids.data_ptr()),
       static_cast<float*>(target_probs.data_ptr()), static_cast<int*>(output_token_ids.data_ptr()),
       static_cast<int*>(output_accepted_token_num.data_ptr()),
-      static_cast<int*>(output_emitted_token_num.data_ptr()), batch_size, num_speculate_tokens,
-      vocab_size, deterministic, philox_seed, philox_offset, stream);
+      static_cast<int*>(output_emitted_draft_token_num.data_ptr()), batch_size,
+      num_speculate_tokens, vocab_size, deterministic, philox_seed, philox_offset, stream);
 
   TORCH_CHECK(status == cudaSuccess, "ChainSpeculativeSampling failed with error code " +
                                          std::string(cudaGetErrorString(status)));
